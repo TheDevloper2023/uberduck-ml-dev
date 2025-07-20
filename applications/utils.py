@@ -125,7 +125,7 @@ def e2eSynthesize(taco2,hifi,input,torchmoji_override, speaker_weighting,synthes
             "max_decoder_steps": synthesis_length * 100,
             "symbol_set": symbol_set,
             "text_cleaners": text_cleaners,
-            "gate_threshold" = 0.25
+            "gate_threshold": 0.25
             }
     )
 
