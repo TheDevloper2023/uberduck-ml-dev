@@ -421,7 +421,6 @@ class Tacotron2Trainer(TTSTrainer):
         return train_set, val_set, train_loader, sampler, collate_fn
 
     def train(self):
-        best_validation_loss = float('inf')
         train_start_time = time.perf_counter()
         print("start train", train_start_time)
         train_set, val_set, train_loader, sampler, collate_fn = self.initialize_loader()
@@ -561,18 +560,18 @@ class Tacotron2Trainer(TTSTrainer):
                     learning_rate=self.learning_rate,
                     global_step=self.global_step,
                 )
-            #Best Validation model, basically best Quality. (Thanks, CookiePPP, for the original Version)
-                
+
             # There's no need to validate in debug mode since we're not really training.
             if self.debug:
                 continue
             if self.is_validate:
-                current_val_loss = self.validate(
+                self.validate(
                     model=model,
                     val_set=val_set,
                     collate_fn=collate_fn,
                     criterion=criterion,
                 )
+
                 if current_val_loss < best_validation_loss:
                     best_validation_loss = current_val_loss
                     print("Saving Best_Val_Model")
@@ -672,7 +671,6 @@ class Tacotron2Trainer(TTSTrainer):
 
         val_log_str = f"Validation loss: {mean_loss:.2f} | mel: {mel_loss:.2f} | gate: {mean_gate_loss:.3f} | t: {time.perf_counter() - val_start_time:.2f}s"
         print(val_log_str)
-        return mean_loss
 
     @property
     def val_dataset_args(self):
