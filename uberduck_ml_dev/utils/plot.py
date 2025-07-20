@@ -14,9 +14,8 @@ from ..text.symbols import id_to_symbol, DEFAULT_SYMBOLS
 
 
 def save_figure_to_numpy(fig):
-    """Save figure to a numpy array."""
-    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
-    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    "Save figure to a numpy array."""
+    data = np.asarray(fig.canvas.buffer_rgba())
     plt.close(fig)
     return data
 
