@@ -573,8 +573,7 @@ class Tacotron2Trainer(TTSTrainer):
                     collate_fn=collate_fn,
                     criterion=criterion,
                 )
-                if (current_val_loss < best_validation_loss):
-                    current_val_loss = self.validate(...)
+                if current_val_loss < best_validation_loss:
                     best_validation_loss = current_val_loss
                     print("Saving Best_Val_Model")
                     print(f"Validation loss: {current_val_loss:.2f}")
