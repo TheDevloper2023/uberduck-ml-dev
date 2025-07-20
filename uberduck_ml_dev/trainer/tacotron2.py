@@ -572,6 +572,19 @@ class Tacotron2Trainer(TTSTrainer):
                     criterion=criterion,
                 )
 
+                if current_val_loss < best_validation_loss:
+                    best_validation_loss = current_val_loss
+                    print("Saving Best_Val_Model")
+                    print(f"Validation loss: {current_val_loss:.2f}")
+                    self.save_checkpoint(
+                        f"{self.checkpoint_name}_Best_Val_Model",
+                        model=model,
+                        optimizer=optimizer,
+                        iteration=epoch,
+                        learning_rate=self.learning_rate,
+                        global_step=self.global_step,
+                    )
+
     def validate(self, **kwargs):
         val_start_time = time.perf_counter()
 
