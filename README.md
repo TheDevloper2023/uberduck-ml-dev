@@ -59,3 +59,6 @@ python -m pytest
 ### 🔧 Troubleshooting
 
 - It is important for you to spell the name of your user and repo correctly in `settings.ini`. If you change the name of the repo, you have to make the appropriate changes in `settings.ini`
+
+### Spoon
+<img src="https://pngimg.com/uploads/spoon/spoon_PNG3044.png">Spoon<img>
