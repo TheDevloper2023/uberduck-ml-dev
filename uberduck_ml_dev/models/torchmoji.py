@@ -542,7 +542,7 @@ TITLES = [
     r"Prof\.",
 ]
 # Ensure case insensitivity
-RE_TITLES = r"|".join([r"(?i)" + t for t in TITLES])
+RE_TITLES = r"|".join(TITLES)
 
 # Symbols have to be created as separate patterns in order to match consecutive
 # identical symbols.
@@ -643,7 +643,7 @@ IGNORED = [RE_WHITESPACE]
 
 # Final pattern
 RE_PATTERN = re.compile(
-    r"|".join(IGNORED) + r"|(" + r"|".join(TOKENS) + r")", re.UNICODE
+    r"|".join(IGNORED) + r"|(" + r"|".join(TOKENS) + r")", re.UNICODE | re.IGNORECASE
 )
 
 
