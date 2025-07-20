@@ -560,7 +560,19 @@ class Tacotron2Trainer(TTSTrainer):
                     learning_rate=self.learning_rate,
                     global_step=self.global_step,
                 )
-
+            #Best Validation model, basically best Quality. (Thanks, CookiePPP, for the original Version)
+            if (mean_loss < best_validation_loss)
+                best_validation_loss = mean_loss
+                print("Saving Best_Val_Model")
+                print("Validation loss: {mean_loss:.2f}")
+                self.save_checkpoint(
+                    f"{self.checkpoint_name}_Best_Val_Model",
+                    model=model,
+                    optimizer=optimizer,
+                    iteration=epoch,
+                    learning_rate=self.learning_rate,
+                    global_step=self.global_step,
+                )
             # There's no need to validate in debug mode since we're not really training.
             if self.debug:
                 continue
