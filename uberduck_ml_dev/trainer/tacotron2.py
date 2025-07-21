@@ -421,6 +421,7 @@ class Tacotron2Trainer(TTSTrainer):
         return train_set, val_set, train_loader, sampler, collate_fn
 
     def train(self):
+        best_validation_loss = 1e3
         train_start_time = time.perf_counter()
         print("start train", train_start_time)
         train_set, val_set, train_loader, sampler, collate_fn = self.initialize_loader()
