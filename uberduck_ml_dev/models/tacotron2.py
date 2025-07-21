@@ -684,7 +684,7 @@ class Encoder(nn.Module):
 from ..vendor.tfcompat.hparam import HParams
 from .base import DEFAULTS as MODEL_DEFAULTS
 
-DEFAULTS = HParams(
+ = HParams(
     symbols_embedding_dim=512,
     fp16_run=False,
     mask_padding=True,
@@ -750,6 +750,7 @@ DEFAULTS = HParams(
     lrdecay_min=0.00001,
     lrdecay_start=1000,
     lrdecay_steps=1000,
+    Save_best_val_model=True
 )
 
 config = DEFAULTS.values()
