@@ -565,7 +565,7 @@ class Tacotron2Trainer(TTSTrainer):
             if self.debug:
                 continue
             if self.is_validate:
-                self.validate(
+                current_val_loss = self.validate(
                     model=model,
                     val_set=val_set,
                     collate_fn=collate_fn,
@@ -671,7 +671,7 @@ class Tacotron2Trainer(TTSTrainer):
 
         val_log_str = f"Validation loss: {mean_loss:.2f} | mel: {mel_loss:.2f} | gate: {mean_gate_loss:.3f} | t: {time.perf_counter() - val_start_time:.2f}s"
         print(val_log_str)
-
+        return mean_loss
     @property
     def val_dataset_args(self):
 
