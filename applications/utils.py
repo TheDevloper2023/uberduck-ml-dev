@@ -20,7 +20,9 @@ import matplotlib.pylab as plt
 import nltk
 nltk.download('averaged_perceptron_tagger_eng')
 from scipy.io import wavfile
+from scipy.signal import butter, lfilter, firwin
 import time
+import torchaudio
 
 graph_width = 900
 graph_height = 360
@@ -95,11 +97,6 @@ def e2eSynthesize(taco2,hifi,input,torchmoji_override, speaker_weighting,synthes
         speaker_count = 1
 
     if "gst_lin.weight" in m.keys():
-        try:
-            torchmoji_downloaded
-        except NameError:
-                subprocess.run(["wget", "https://github.com/johnpaulbin/torchMoji/releases/download/files/pytorch_model.bin", "-O", "models/torchmoji/pytorch_model.bin"])
-                subprocess.run(["wget", "https://raw.githubusercontent.com/johnpaulbin/torchMoji/master/model/vocabulary.json", "-O", "models/torchmoji/vocabulary.json"])
         torchmoji_downloaded = True
         use_torchmoji = True
         config.update(
@@ -125,7 +122,6 @@ def e2eSynthesize(taco2,hifi,input,torchmoji_override, speaker_weighting,synthes
             "max_decoder_steps": synthesis_length * 100,
             "symbol_set": symbol_set,
             "text_cleaners": text_cleaners,
-            "gate_threshold": 0.25
             }
     )
 
@@ -205,63 +201,85 @@ def e2eSynthesize(taco2,hifi,input,torchmoji_override, speaker_weighting,synthes
 
     input_ = [text_padded, input_lengths, speakerembedding, embedding]
     output = taco.inference(self = taco, inputs = input_) # idk why i need to specify but it complained otherwise
+    print("Running Hifi-gan")
 
-    y_g_hat = hifigan(output[1][:1].float())
-    audio = y_g_hat.squeeze()
-    audio = audio * MAX_WAV_VALUE
-    audio_denoised = denoiser(audio.view(1, -1), strength=denoise1)[:, 0]
-    audio_denoised = audio_denoised.detach().cpu().numpy().reshape(-1)
 
-    normalize = (MAX_WAV_VALUE / np.max(np.abs(audio_denoised))) ** 0.85
-    audio_denoised = audio_denoised * normalize
-    wave = resampy.resample(
-                        audio_denoised,
-                        h.sampling_rate,
-                        h2.sampling_rate,
-                        filter="kaiser_best",
-                        window=scipy.signal.windows.hann,
-                        num_zeros=18,
-                    )
-    wave_out = wave.astype(np.int16)
-    wave = wave / MAX_WAV_VALUE
-    wave = torch.FloatTensor(wave).to(torch.device(device))
-    new_mel = mel_spectrogram(
-                        wave.unsqueeze(0),
-                        h2.n_fft,
-                        h2.num_mels,
-                        h2.sampling_rate,
-                        h2.hop_size,
-                        h2.win_size,
-                        h2.fmin,
-                        h2.fmax,
-    )
-    y_g_hat2 = hifigan_sr(new_mel.to(device))
-    audio2 = y_g_hat2.squeeze()
-    audio2 = audio2 * MAX_WAV_VALUE
-    audio2_denoised = denoiser(audio2.view(1, -1), strength=denoise2)[:, 0]
-    audio2_denoised = audio2_denoised.detach().cpu().numpy().reshape(-1)
-    
-    b = scipy.signal.firwin(
-                        101, cutoff=10500, fs=h2.sampling_rate, pass_zero=False
-    )
-    y = scipy.signal.lfilter(b, [1.0], audio2_denoised)
-    y *= superres_strength
-    y_out = y.astype(np.int16)
-    y_padded = np.zeros(wave_out.shape)
-    y_padded[: y_out.shape[0]] = y_out
-    sr_mix = wave_out + y_padded
-    sr_mix = sr_mix / normalize
+    def vocode_mel_spectrogram(mel_postnet):
+            """Vocode mel spectrogram using HiFi-GAN with denoising."""
+            y_g_hat = hifigan(mel_postnet.float())
+            audio = y_g_hat.squeeze() 
+            audio *= MAX_WAV_VALUE
+            audio_denoised = denoiser(audio.view(1, -1), strength=denoise1)[:, 0].detach().cpu().numpy().reshape(-1)
+            return audio_denoised
 
-    plot = plot_data((output[1][:1].float().data.cpu().numpy()[0],
-            output[3].float().data.cpu().numpy()[0].T))
+    def resample_audio(audio, original_sr, target_sr):
+            if isinstance(audio, np.ndarray):
+                audio = torch.from_numpy(audio).float()
+
+            if len(audio.shape) == 1:
+                audio = audio.unsqueeze(0)  # (1, T)
+
+            resampler = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=target_sr)
+            audio_resampled = resampler(audio)
+
+            return audio_resampled.squeeze(0).numpy()
+
+    def apply_super_resolution(base_audio):
+            """Apply HiFi-GAN super-resolution with high-pass filtering."""
+            wave = base_audio.astype(np.float32) / MAX_WAV_VALUE
+            wave = torch.FloatTensor(wave).to(device)
+            mel = mel_spectrogram(
+                wave.unsqueeze(0),
+                h2.n_fft,
+                h2.num_mels,
+                h2.sampling_rate,
+                h2.hop_size,
+                h2.win_size,
+                h2.fmin,
+                h2.fmax,
+            )
+            sr_hat = hifigan_sr(mel).squeeze() * MAX_WAV_VALUE
+            sr_audio = denoiser_sr(sr_hat.view(1, -1), strength=denoise2)[:, 0].detach().cpu().numpy().reshape(-1)
+        
+            # Apply high-pass filter using firwin to boost high frequencies
+            b = firwin(101, cutoff=10500, fs=h2.sampling_rate, pass_zero=False)
+            sr_audio = lfilter(b, 1, sr_audio)
+            
+            # Adjust super-resolution strength for balanced enhancement
+            high_freqs = superres_strength * sr_audio
+            return high_freqs.astype(np.float32)
+
+    def merge_audio(original, superres, normalize=True):
+            """Merge base and super-resolution audio."""
+            min_len = min(len(original), len(superres))
+            original = original[:min_len].astype(np.float32)
+            superres = superres[:min_len].astype(np.float32)
+
+            merged = original + superres
+
+            if normalize:
+                peak = np.max(np.abs(merged))
+                if peak > 0:
+                    merged *= 0.98 / peak
+
+            merged = np.clip(merged, -1, 1)
+            final_audio_int16 = (merged * 32767).astype(np.int16)
+
+            return final_audio_int16
+        
+    audio_denoised = vocode_mel_spectrogram(output[1][:1])
+    audio_denoised = resample_audio(audio_denoised, h.sampling_rate, h2.sampling_rate)
+
+    audio2_denoised = apply_super_resolution(audio_denoised)
+
+    audio_final = merge_audio(audio_denoised, audio2_denoised, normalize=True)
+
     
     plot_data_tuple = (output[1][:1].float().data.cpu().numpy()[0], output[3].float().data.cpu().numpy()[0].T)
     plot_img = plot_data(plot_data_tuple, figsize=(graph_width/100, graph_height/100))
-
+    
     audio_path = f"output/audio/{str(time.time())}.wav"
-    audio_int16 = sr_mix.astype(np.int16)
-    wavfile.write(audio_path,h2.sampling_rate , audio_int16)
-
+    wavfile.write(audio_path,h2.sampling_rate , audio_final)
 
     return audio_path, plot_img
 
@@ -270,4 +288,3 @@ def download_models(model_type, model_id):
     os.chdir(os.path.join("models",model_type))
     subprocess.run(["gdown","--id",model_id])
     os.chdir("../..")
-   
