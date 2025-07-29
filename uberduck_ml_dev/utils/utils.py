@@ -20,10 +20,20 @@ import librosa
 from torch.nn import functional as F
 
 
-def load_filepaths_and_text(filename: str, split: str = "|"):
-    with open(filename, encoding="utf-8") as f:
-        filepaths_and_text = [line.strip().split(split) for line in f]
-    return filepaths_and_text
+def load_filepaths_and_text(filename: str, split: str = "|", relative = False):
+    if relative:
+            filepaths_and_text = []
+            for line in f:
+                data = line.strip().split(split)
+                data[0] = relative + data[0]
+                try:
+                    data[2]
+                except:
+                    data.append("0")
+                filepaths_and_text.append(data)
+            return filepaths_and_text
+         filepaths_and_text = [line.strip().split(split) for line in f]
+     return filepaths_and_text
 
 # Cell
 
