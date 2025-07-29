@@ -125,13 +125,14 @@ class TextMelDataset(Dataset):
         oversample_weights=None,
         intersperse_text: bool = False,
         intersperse_token: int = 0,
+        relative=False,
         compute_gst=None,
     ):
         super().__init__()
         path = audiopaths_and_text
         oversample_weights = oversample_weights or {}
         self.audiopaths_and_text = oversample(
-            load_filepaths_and_text(path), oversample_weights
+           load_filepaths_and_text(path, relative=relative), oversample_weights
         )
         self.text_cleaners = text_cleaners
         self.p_arpabet = p_arpabet
@@ -212,6 +213,7 @@ class TextMelDataset(Dataset):
             "speaker_id": speaker_id,
             "embedded_gst": None,
             "f0": None,
+            "path": path,
         }
 
         if self.compute_gst:
