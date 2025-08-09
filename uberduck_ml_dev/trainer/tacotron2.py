@@ -346,6 +346,7 @@ class Tacotron2Trainer(TTSTrainer):
         alignment_metrics = get_alignment_metrics(alignments)
         alignment_diagonalness = alignment_metrics["diagonalness"]
         alignment_max = alignment_metrics["max"]
+        weighted_score = alignment_max - alignment_diagonalness
 
         sample_idx = randint(0, mel_out_postnet.size(0) - 1)
         audio = self.sample(mel=mel_out_postnet[sample_idx])
@@ -422,6 +423,8 @@ class Tacotron2Trainer(TTSTrainer):
 
     def train(self):
         best_validation_loss = 1e3
+        best_inf_attsc = -99
+        
         train_start_time = time.perf_counter()
         print("start train", train_start_time)
         train_set, val_set, train_loader, sampler, collate_fn = self.initialize_loader()
@@ -566,7 +569,7 @@ class Tacotron2Trainer(TTSTrainer):
             if self.debug:
                 continue
             if self.is_validate:
-                current_val_loss = self.validate(
+                current_val_loss, current_val_score = self.validate(
                     model=model,
                     val_set=val_set,
                     collate_fn=collate_fn,
@@ -579,6 +582,18 @@ class Tacotron2Trainer(TTSTrainer):
                     print(f"Validation loss: {current_val_loss:.2f}")
                     self.save_checkpoint(
                         f"{self.checkpoint_name}_Best_Val_Model",
+                        model=model,
+                        optimizer=optimizer,
+                        iteration=epoch,
+                        learning_rate=self.learning_rate,
+                        global_step=self.global_step
+                    )
+
+                if current_val_score > best_inf_attsc:
+                    best_inf_attsc = current_val_score
+                    print(f"Saving Best_Inf_AttSC model (score: {current_val_score:.4f})")
+                    self.save_checkpoint(
+                        f"{self.checkpoint_name}_Best_Inf_AttSC",
                         model=model,
                         optimizer=optimizer,
                         iteration=epoch,
@@ -668,11 +683,18 @@ class Tacotron2Trainer(TTSTrainer):
                 speakers_val,
             )
 
+        _, mel_out_postnet, gate_outputs, alignments, *_ = y_pred
+        alignment_metrics = get_alignment_metrics(alignments)
+        alignment_diagonalness = alignment_metrics["diagonalness"]
+        alignment_max = alignment_metrics["max"]
+
+        weighted_score = alignment_max - alignment_diagonalness
         model.train()
 
         val_log_str = f"Validation loss: {mean_loss:.2f} | mel: {mel_loss:.2f} | gate: {mean_gate_loss:.3f} | t: {time.perf_counter() - val_start_time:.2f}s"
         print(val_log_str)
-        return mean_loss
+
+        return mean_loss, weighted_score
     @property
     def val_dataset_args(self):
 
