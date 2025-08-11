@@ -21,7 +21,8 @@ from ..utils.utils import to_gpu, get_mask_from_lengths
 import numpy as np
 import torch
 from torch.autograd import Variable
-from torch.cuda.amp import autocast
+# replaced deprecated cuda amp import with modern amp
+from torch import amp
 from torch.nn import functional as F
 
 
@@ -197,6 +198,22 @@ class Decoder(nn.Module):
         attention_weights:
         """
         cell_input = torch.cat((decoder_input, self.attention_context), -1)
+
+        # Ensure dtype/device consistency before calling attention_rnn
+        try:
+            rnn_param = next(self.attention_rnn.parameters())
+            rnn_device = rnn_param.device
+            rnn_dtype = rnn_param.dtype
+            # cast inputs and hidden/cell to rnn param dtype/device
+            cell_input = cell_input.to(device=rnn_device, dtype=rnn_dtype)
+            if isinstance(self.attention_hidden, torch.Tensor):
+                self.attention_hidden = self.attention_hidden.to(device=rnn_device, dtype=rnn_dtype)
+            if isinstance(self.attention_cell, torch.Tensor):
+                self.attention_cell = self.attention_cell.to(device=rnn_device, dtype=rnn_dtype)
+        except StopIteration:
+            # fallback: if no parameters (shouldn't happen), do nothing
+            pass
+
         self.attention_hidden, self.attention_cell = self.attention_rnn(
             cell_input, (self.attention_hidden, self.attention_cell)
         )
@@ -225,6 +242,20 @@ class Decoder(nn.Module):
 
         self.attention_weights_cum += self.attention_weights
         decoder_input = torch.cat((self.attention_hidden, self.attention_context), -1)
+
+        # Ensure dtype/device consistency before calling decoder_rnn
+        try:
+            rnn_param2 = next(self.decoder_rnn.parameters())
+            rnn2_device = rnn_param2.device
+            rnn2_dtype = rnn_param2.dtype
+            decoder_input = decoder_input.to(device=rnn2_device, dtype=rnn2_dtype)
+            if isinstance(self.decoder_hidden, torch.Tensor):
+                self.decoder_hidden = self.decoder_hidden.to(device=rnn2_device, dtype=rnn2_dtype)
+            if isinstance(self.decoder_cell, torch.Tensor):
+                self.decoder_cell = self.decoder_cell.to(device=rnn2_device, dtype=rnn2_dtype)
+        except StopIteration:
+            pass
+
         self.decoder_hidden, self.decoder_cell = self.decoder_rnn(
             decoder_input, (self.decoder_hidden, self.decoder_cell)
         )
@@ -302,7 +333,7 @@ class Decoder(nn.Module):
             # NOTE(zach): When training with fp16_run == True, decoder_rnn seems to run into
             # issues with NaNs in gradient, maybe due to vanishing gradients.
             # Disable half-precision for this call to work around the issue.
-            with autocast(enabled=False):
+            with amp.autocast(device_type='cuda', enabled=False):
                 mel_output, gate_output, attention_weights = self.decode(decoder_input)
             mel_outputs = torch.cat(
                 [
