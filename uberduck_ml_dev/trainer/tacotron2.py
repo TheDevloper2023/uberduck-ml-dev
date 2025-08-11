@@ -54,7 +54,7 @@ from pprint import pprint
 from random import choice
 
 import torch
-from torch.cuda.amp import autocast, GradScaler
+from torch import amp
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tensorboardX import SummaryWriter
@@ -454,7 +454,7 @@ class Tacotron2Trainer(TTSTrainer):
                 model, optimizer, start_epoch = self.warm_start(model, optimizer)
 
         if self.fp16_run:
-            scaler = GradScaler()
+            scaler = amp.GradScaler()
 
         start_time, previous_start_time = time.perf_counter(), time.perf_counter()
         for epoch in range(start_epoch, self.epochs):
@@ -486,7 +486,7 @@ class Tacotron2Trainer(TTSTrainer):
                 else:
                     X, y = model.parse_batch(batch)
                 if self.fp16_run:
-                    with autocast():
+                    with amp.autocast(device_type='cuda', enabled=False):
                         y_pred = model(X)
 
                         (
