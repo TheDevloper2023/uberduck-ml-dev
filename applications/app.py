@@ -21,17 +21,6 @@ def refresh_models(current_taco, current_hifi):
     ]
 
 
-def synthesize_wrapper(*args):
-    """Wrapper to catch and log errors during synthesis"""
-    try:
-        logger.info("Starting synthesis")
-        result = e2eSynthesize(*args)
-        logger.info("Synthesis completed successfully")
-        return result
-    except Exception as e:
-        logger.error(f"Synthesis error: {str(e)}")
-        return None, f"Error: {str(e)}"
-
 with gr.Blocks() as webui:
     with gr.Tab("Inference"):
         with gr.Row():
@@ -96,7 +85,7 @@ with gr.Blocks() as webui:
                 label="Phoneme Symbol Set",
                 choices=["nvidia_taco2", "ipa", "portuguese", "polish", 
                          "dutch", "spanish", "norwegian", "russian", 
-                         "ukrainian", "turkish"],
+                         "ukrainian", "turkish", "dutch"],
                 value="nvidia_taco2",
                 info="Set language symbol set (use 'nvidia_taco2' for English)",
                 interactive=True
