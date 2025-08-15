@@ -33,6 +33,8 @@ __all__ = [
     "id_to_symbol",
     "curly_re",
     "words_re",
+    "symbols_romanian",
+    "ROMANIAN_SYMBOLS"
 ]
 
 # Cell
