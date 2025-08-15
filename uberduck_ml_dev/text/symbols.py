@@ -226,6 +226,7 @@ SYMBOL_SETS = {
     TURKISH_SYMBOLS: symbols_turkish,
     RUSSIAN_SYMBOLS: symbols_russian,
     UKRAINIAN_SYMBOLS: symbols_ukrainian,
+    ROMANIAN_SYMBOLS: symbols_romanian,
 }
 
 # Cell
@@ -246,6 +247,8 @@ symbol_to_id = {
     TURKISH_SYMBOLS: {s: i for i, s in enumerate(SYMBOL_SETS[TURKISH_SYMBOLS])},
     RUSSIAN_SYMBOLS: {s: i for i, s in enumerate(SYMBOL_SETS[RUSSIAN_SYMBOLS])},
     UKRAINIAN_SYMBOLS: {s: i for i, s in enumerate(SYMBOL_SETS[UKRAINIAN_SYMBOLS])},
+    ROMANIAN_SYMBOLS: {s: i for i, s in enumerate(SYMBOL_SETS[ROMANIAN_SYMBOLS])},
+    
 }
 id_to_symbol = {
     DEFAULT_SYMBOLS: {i: s for i, s in enumerate(SYMBOL_SETS[DEFAULT_SYMBOLS])},
@@ -262,6 +265,7 @@ id_to_symbol = {
     TURKISH_SYMBOLS: {i: s for i, s in enumerate(SYMBOL_SETS[TURKISH_SYMBOLS])},
     RUSSIAN_SYMBOLS: {i: s for i, s in enumerate(SYMBOL_SETS[RUSSIAN_SYMBOLS])},
     UKRAINIAN_SYMBOLS: {i: s for i, s in enumerate(SYMBOL_SETS[UKRAINIAN_SYMBOLS])},
+    ROMANIAN_SYMBOLS: {i: s for i, s in enumerate(SYMBOL_SETS[ROMANIAN_SYMBOLS])},
 }
 
 curly_re = re.compile(r"(.*?)\{(.+?)\}(.*)")
