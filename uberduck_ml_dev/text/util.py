@@ -10,6 +10,7 @@ __all__ = [
     "convert_to_arpabet",
     "basic_cleaners",
     "turkish_cleaners",
+    "romanian_cleaners",
     "transliteration_cleaners",
     "english_cleaners",
     "english_cleaners_phonemizer",
@@ -198,6 +199,17 @@ def turkish_cleaners(text):
     text = lowercase(text)
     text = collapse_whitespace(text)
     return text
+
+def romanian_cleaners(text):
+    text = text.replace("Ş", "Ș").replace("ş", "ș")
+    text = text.replace("Ţ", "Ț").replace("ţ", "ț")
+    text = text.replace('"', "").replace("'", "")
+    
+    text = lowercase(text)
+    text = collapse_whitespace(text)
+    
+    return text
+
 
 
 def transliteration_cleaners(text):
