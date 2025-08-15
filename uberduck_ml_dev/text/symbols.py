@@ -174,9 +174,20 @@ symbols_ukrainian = (
     + list(_ukrainian)
     + _arpabet
 )
-
 UKRAINIAN_SYMBOLS = "ukrainian"
 
+
+_romanian = "AĂÂBCDEFGHIÎJKLMNOPQRSȘTȚUVWXYZaăâbcdefghiîjklmnopqrsștțuvwxyz"
+
+symbols_romanian = (
+    [_pad]
+    + list(_special_nvidia_taco2)
+    + list(_punctuation_nvidia_taco2)
+    + list(_romanian)
+    + _arpabet
+)
+
+ROMANIAN_SYMBOLS = "romanian"
 
 # Export all symbols:
 symbols = (
