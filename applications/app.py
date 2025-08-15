@@ -85,7 +85,7 @@ with gr.Blocks() as webui:
                 label="Phoneme Symbol Set",
                 choices=["nvidia_taco2", "ipa", "portuguese", "polish", 
                          "dutch", "spanish", "norwegian", "russian", 
-                         "ukrainian", "turkish", "dutch"],
+                         "ukrainian", "turkish", "dutch", "romanian"],
                 value="nvidia_taco2",
                 info="Set language symbol set (use 'nvidia_taco2' for English)",
                 interactive=True
