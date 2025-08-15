@@ -72,7 +72,7 @@ def e2eSynthesize(taco2,hifi,input,torchmoji_override, speaker_weighting,synthes
 :sparkling_heart: :blue_heart: :grimacing: :sparkles:".split(' ')
     config = DEFAULTS.values()
 
-    text_cleaners = ["english_cleaners"] if symbol_set == "nvidia_taco2" else ["turkish_cleaners"] if symbol_set == "turkish" else ["basic_cleaners"]
+    text_cleaners = ["english_cleaners"] if symbol_set == "nvidia_taco2" else ["turkish_cleaners"] if symbol_set == "turkish" else ["romanian_cleaners"] if symbol_set == "romanian" else ["basic_cleaners"]
 
     m = torch.load(tacotron2_pth, map_location = torch.device("cpu"))
 
