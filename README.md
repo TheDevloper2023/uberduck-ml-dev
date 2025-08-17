@@ -19,9 +19,9 @@ An overview of the subpackages in this library:
 ## Installation
 
 ```
-conda create -n 'uberduck-ml-dev' python=3.8
+conda create -n 'uberduck-ml-dev'
 source activate uberduck-ml-dev
-pip install git+https://github.com/uberduck-ai/uberduck-ml-dev.git
+pip install git+https://github.com/TheDevloper2023/uberduck-ml-dev.git
 ```
 
 ## Development
@@ -35,7 +35,7 @@ pip install pre-commit black
 Clone the repository:
 
 ```bash
-git clone git@github.com:uberduck-ai/uberduck-ml-dev.git
+git clone https://github.com/TheDevloper2023/uberduck-ml-dev.git
 ```
 
 Install required Git hooks:
