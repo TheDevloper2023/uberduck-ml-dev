@@ -1,6 +1,7 @@
 This is a fork of Uberduck that adds new features and fixes to the repository. Credits to the Uberduck community and the pony perversion project!
 
 Training Notebook: https://colab.research.google.com/gist/TheDevloper2023/8bded51fa2c7b9178462ee9fe4b3b0f0/uberduck-pipeline-training-but-awesome.ipynb?authuser=1#scrollTo=NVI9tAQFvO7x
+
 Synthesis Notebook: https://colab.research.google.com/drive/1wXWuhnw2pdfFy1L-pUzHfopW10W2GiJS#scrollTo=6hZdobBRWP_b
 
 
