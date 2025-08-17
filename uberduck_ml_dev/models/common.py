@@ -91,6 +91,10 @@ class LocationLayer(nn.Module):
         )
 
     def forward(self, attention_weights_cat):
+        conv_param_dtype = next(self.location_conv.parameters()).dtype
+        if attention_weights_cat.dtype != conv_param_dtype:
+            attention_weights_cat = attention_weights_cat.to(conv_param_dtype)
+
         processed_attention = self.location_conv(attention_weights_cat)
         processed_attention = processed_attention.transpose(1, 2)
         processed_attention = self.location_dense(processed_attention)
@@ -172,10 +176,14 @@ class Attention(nn.Module):
                 alignment.data.masked_fill_(mask, self.score_mask_value)
 
             attention_weights = F.softmax(alignment, dim=1)
-        attention_context = torch.bmm(attention_weights.unsqueeze(1), memory)
-        attention_context = attention_context.squeeze(1)
+            if attention_weights.dtype != memory.dtype:
+                # prefer casting the (small) attention weights to the (larger) memory dtype
+                attention_weights = attention_weights.to(memory.dtype)
 
-        return attention_context, attention_weights
+            attention_context = torch.bmm(attention_weights.unsqueeze(1), memory)
+            attention_context = attention_context.squeeze(1)
+
+            return attention_context, attention_weights
 
 # Cell
 
