@@ -2,12 +2,27 @@
 
 __all__ = ["Tacotron2Loss", "Tacotron2Trainer", "config", "DEFAULTS"]
 
+# At the VERY TOP of your script (before any imports)
+import torch
+import os
+
+# Memory optimization
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"  # Reduce fragmentation
+
+# GPU performance tweaks
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = False  # Disable on RTX 2050
+torch.backends.cudnn.allow_tf32 = False
+torch.set_float32_matmul_precision('medium')  # For PyTorch 2.0+
+torch.backends.cudnn.deterministic = False
+
+
+
 # Cell
 from random import choice, randint
 import time
 from typing import List
 
-import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -418,10 +433,13 @@ class Tacotron2Trainer(TTSTrainer):
             shuffle=(sampler is None),
             sampler=sampler,
             collate_fn=collate_fn,
+
         )
         return train_set, val_set, train_loader, sampler, collate_fn
 
     def train(self):
+        torch.cuda.empty_cache()
+        torch.backends.cuda.cufft_plan_cache.clear()
         best_validation_loss = 1e3
         best_inf_attsc = -99
         
@@ -486,7 +504,7 @@ class Tacotron2Trainer(TTSTrainer):
                 else:
                     X, y = model.parse_batch(batch)
                 if self.fp16_run:
-                    with amp.autocast(device_type='cuda', enabled=False):
+                    with amp.autocast(device_type='cuda', enabled=self.fp16_run):
                         y_pred = model(X)
 
                         (
@@ -628,15 +646,19 @@ class Tacotron2Trainer(TTSTrainer):
                 shuffle=False,
                 batch_size=self.batch_size,
                 collate_fn=collate_fn,
+
             )
             for batch in val_loader:
                 total_steps += 1
                 if self.distributed_run:
                     X, y = model.module.parse_batch(batch)
+                    X, y = X.to('cuda'), y.to('cuda')
                     speakers_val.append(X[5])
                 else:
                     X, y = model.parse_batch(batch)
+                    X, y = X.to('cuda'), y.to('cuda')
                     speakers_val.append(X[5])
+                
                 y_pred = model(X)
                 mel_loss, gate_loss, mel_loss_batch, gate_loss_batch = criterion(
                     y_pred, y
