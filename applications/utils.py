@@ -171,7 +171,7 @@ def e2eSynthesize(taco2,hifi,input,torchmoji_override, speaker_weighting,synthes
 
 
     hifigan, h, denoiser = load_hifi(hifi_pth, "config_v1", device)
-    hifigan_sr, h2, denoiser_sr = load_hifi("models/sr/Superres_Twilight_33000", "config_32k", device)
+    hifigan_sr, h2, denoiser_sr = load_hifi("models/sr/Superres_Twilight_33000.pth", "config_32k", device)
 
     cpu_run = not use_gpu
     text_padded, input_lengths = prepare_input_sequence(
