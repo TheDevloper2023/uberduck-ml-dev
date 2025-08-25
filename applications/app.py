@@ -1,17 +1,18 @@
 import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:215"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import gradio as gr
-from utils import e2eSynthesize, plot_data, download_models
-import warnings
+from utils import e2eSynthesize, download_models
+import torch
+torch.cuda.empty_cache()
 
 
 
 def get_models(type):
     try:
         models = os.listdir(os.path.join("models", type))
-        #logger.info(f"Found {len(models)} models in models/{type}")
         return models
     except Exception as e:
-        #logger.error(f"Error loading models for {type}: {str(e)}")
         return []
 
 def refresh_models(current_taco, current_hifi):
@@ -64,10 +65,10 @@ with gr.Blocks() as webui:
         with gr.Row():
             with gr.Column():
                 audio_out = gr.Audio(label="Output", interactive=False)
-            
+                error_output = gr.Textbox(label="Error Messages", interactive=False)
             with gr.Column():
                 alignment_plot = gr.Image(label="Alignment and Mel Spectrogram", interactive=False)
-                error_output = gr.Textbox(label="Error Messages", interactive=False)
+
     
     with gr.Tab("Settings"):
         gr.Markdown("### Tacotron Settings")
@@ -93,7 +94,7 @@ with gr.Blocks() as webui:
             with gr.Row():
                 arpabet = gr.Checkbox(
                     label="Enable ARPAbet",
-                    value=False,
+                    value=True,
                     info="Use ARPAbet phoneme representation",
                     interactive=True
                 )
@@ -105,9 +106,19 @@ with gr.Blocks() as webui:
                     "Split text by sentences",
                     "Split text by sentences and quotes"
                 ],
-                value="Feed entire text into model",
-                interactive=False,
-                info="⚠️ Not implemented yet - functionality coming soon"
+                value="Split text by sentences and quotes",
+                interactive=True,
+                info="Idk how to explain."
+            )
+
+            textseg_len_target = gr.Slider(
+                label="Text Segment Length Target",
+                minimum=100,
+                maximum=2000,
+                value=800,
+                step=50,
+                info="Target length for text segmentation",
+                interactive=True
             )
 
         gr.Markdown("---\n### HiFi-GAN Settings")
@@ -139,6 +150,13 @@ with gr.Blocks() as webui:
                 info="Controls the strength of the superresolution effect",
                 interactive=True
             )
+
+            skip_sr = gr.Checkbox(
+                label="Skip Super-Resolution",
+                value=False,
+                info="If checked, SR will be skipped. Recomended if the output sounds wierd.",
+                interactive=True
+            )
     with gr.Tab("Download Models"):
         model_type = gr.Dropdown (
             label="Model type",
@@ -165,10 +183,10 @@ with gr.Blocks() as webui:
 
     synthise.click(
         fn=e2eSynthesize,
-        inputs=[tacotron2_model_list, hifigan_model_list, input_text, torchmoji_overwrite,
+                inputs=[tacotron2_model_list, hifigan_model_list, input_text, torchmoji_overwrite,
                 speaker_weighing, synth_len, symbol_set, arpabet, denoise1, denoise2,
-                superres_strength],
+                superres_strength, split_text, textseg_len_target, skip_sr],
         outputs=[audio_out, alignment_plot]
     )
 
-webui.launch(debug=False, share=True)
+webui.launch(debug=False, share=False)
