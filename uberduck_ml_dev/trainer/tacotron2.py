@@ -652,11 +652,9 @@ class Tacotron2Trainer(TTSTrainer):
                 total_steps += 1
                 if self.distributed_run:
                     X, y = model.module.parse_batch(batch)
-                    X, y = X.to('cuda'), y.to('cuda')
                     speakers_val.append(X[5])
                 else:
                     X, y = model.parse_batch(batch)
-                    X, y = X.to('cuda'), y.to('cuda')
                     speakers_val.append(X[5])
                 
                 y_pred = model(X)
