@@ -278,7 +278,7 @@ def e2eSynthesize(taco2,hifi,input,torchmoji_override, speaker_weighting,synthes
         sr_audio = denoiser_sr(sr_hat.view(1, -1), strength=denoise2)[:, 0].detach().cpu().numpy().reshape(-1)
 
         # Smooth low-pass to isolate highs (not remove mids!)
-        b = firwin(601, cutoff=9000, fs=h2.sampling_rate, pass_zero=False, window=('kaiser', 1.0)).astype(np.float32)
+        b = scipy.signal.firwin(101, cutoff=10500, fs=h2.sampling_rate, pass_zero=False)
         sr_audio = lfilter(b, 1.0, sr_audio) * 1.5
 
         # Adjust super-resolution strength for balance
