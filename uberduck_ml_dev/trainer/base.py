@@ -148,7 +148,7 @@ class TTSTrainer:
             print(f"Best_Validation_Loss is {self.best_val_loss}")
         if "best_inf_attsc" in checkpoint:
             self.best_inf_attsc = checkpoint["best_inf_attsc"]
-            print(f"best_inf_attsc is {self.best_inf_attsc")
+            print(f"best_inf_attsc is {self.best_inf_attsc}")
         print("Ending warm_start", time.perf_counter())
         return model, optimizer, start_epoch
 
