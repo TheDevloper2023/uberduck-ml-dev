@@ -19,55 +19,19 @@ __all__ = [
 ]
 
 
-""" from https://github.com/jik876/hifi-gan """
-
-import argparse
-import json
-import datetime as dt
-import numpy as np
-from scipy.io.wavfile import write
+""" from https://github.com/rishikksh20/Avocodo-pytorch """
 
 import torch
+import json
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.nn import Conv1d, ConvTranspose1d, AvgPool1d, Conv2d
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
-
-# NOTE(zach): This is config_v1 from https://github.com/jik876/hifi-gan.
-DEFAULTS = {
-    "resblock": "1",
-    "num_gpus": 0,
-    "batch_size": 16,
-    "learning_rate": 0.0002,
-    "adam_b1": 0.8,
-    "adam_b2": 0.99,
-    "lr_decay": 0.999,
-    "seed": 1234,
-    "upsample_rates": [8, 8, 2, 2],
-    "upsample_kernel_sizes": [16, 16, 4, 4],
-    "upsample_initial_channel": 512,
-    "resblock_kernel_sizes": [3, 7, 11],
-    "resblock_dilation_sizes": [[1, 3, 5], [1, 3, 5], [1, 3, 5]],
-    "segment_size": 8192,
-    "num_mels": 80,
-    "num_freq": 1025,
-    "n_fft": 1024,
-    "hop_size": 256,
-    "win_size": 1024,
-    "sampling_rate": 22050,
-    "fmin": 0,
-    "fmax": 8000,
-    "fmax_for_loss": None,
-    "num_workers": 4,
-    "dist_config": {
-        "dist_backend": "nccl",
-        "dist_url": "tcp://localhost:54321",
-        "world_size": 1,
-    },
-}
+import numpy as np
+from scipy import signal as sig
 
 
-class HiFiGanGenerator(nn.Module):
+class AvocodoGenerator(nn.Module):
     def __init__(self, config, checkpoint, cudnn_enabled=False):
         super().__init__()
         self.config = config
@@ -92,8 +56,6 @@ class HiFiGanGenerator(nn.Module):
 
     @torch.no_grad()
     def load_config(self):
-        if isinstance(self.config, dict):
-            return AttrDict(self.config)
         with open(self.config) as f:
             h = AttrDict(json.load(f))
         return h
@@ -254,7 +216,7 @@ class Generator(torch.nn.Module):
         self.num_kernels = len(h.resblock_kernel_sizes)
         self.num_upsamples = len(h.upsample_rates)
         self.conv_pre = weight_norm(
-            Conv1d(80, h.upsample_initial_channel, 7, 1, padding=3)
+            Conv1d(h.num_mels, h.upsample_initial_channel, 7, 1, padding=3)
         )
         resblock = ResBlock1 if h.resblock == "1" else ResBlock2
 
@@ -281,11 +243,23 @@ class Generator(torch.nn.Module):
                 self.resblocks.append(resblock(h, ch, k, d))
 
         self.conv_post = weight_norm(Conv1d(ch, 1, 7, 1, padding=3))
+        print(self.conv_post)
         self.ups.apply(init_weights)
         self.conv_post.apply(init_weights)
 
+        self.out_proj_x1 = weight_norm(
+            Conv1d(h.upsample_initial_channel // 4, 1, 7, 1, padding=3)
+        )
+        self.out_proj_x2 = weight_norm(
+            Conv1d(h.upsample_initial_channel // 8, 1, 7, 1, padding=3)
+        )
+
     def forward(self, x):
+
+        x1 = None
+        x2 = None
         x = self.conv_pre(x)
+
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, LRELU_SLOPE)
             x = self.ups[i](x)
@@ -296,6 +270,12 @@ class Generator(torch.nn.Module):
                 else:
                     xs += self.resblocks[i * self.num_kernels + j](x)
             x = xs / self.num_kernels
+
+            if i == 1:
+                x1 = self.out_proj_x1(x)
+            elif i == 2:
+                x2 = self.out_proj_x2(x)
+
         x = F.leaky_relu(x)
         x = self.conv_post(x)
         x = torch.tanh(x)
@@ -303,6 +283,7 @@ class Generator(torch.nn.Module):
         return x
 
     def remove_weight_norm(self):
+        print("Removing weight norm...")
         for l in self.ups:
             remove_weight_norm(l)
         for l in self.resblocks:
@@ -473,6 +454,182 @@ class MultiScaleDiscriminator(torch.nn.Module):
         return y_d_rs, y_d_gs, fmap_rs, fmap_gs
 
 
+class MultiCoMBDiscriminator(torch.nn.Module):
+    def __init__(self, kernels, channels, groups, strides):
+        super(MultiCoMBDiscriminator, self).__init__()
+        self.combd_1 = CoMBD(
+            filters=channels, kernels=kernels[0], groups=groups, strides=strides
+        )
+        self.combd_2 = CoMBD(
+            filters=channels, kernels=kernels[1], groups=groups, strides=strides
+        )
+        self.combd_3 = CoMBD(
+            filters=channels, kernels=kernels[2], groups=groups, strides=strides
+        )
+
+        self.pqmf_2 = PQMF(N=2, taps=256, cutoff=0.25, beta=10.0)
+        self.pqmf_4 = PQMF(N=4, taps=192, cutoff=0.13, beta=10.0)
+
+    def forward(self, x, x_hat, x2_hat, x1_hat):
+        y = []
+        y_hat = []
+        fmap = []
+        fmap_hat = []
+
+        p3, p3_fmap = self.combd_3(x)
+        y.append(p3)
+        fmap.append(p3_fmap)
+
+        p3_hat, p3_fmap_hat = self.combd_3(x_hat)
+        y_hat.append(p3_hat)
+        fmap_hat.append(p3_fmap_hat)
+
+        x2_ = self.pqmf_2(x)[:, :1, :]  # Select first band
+        x1_ = self.pqmf_4(x)[:, :1, :]  # Select first band
+
+        x2_hat_ = self.pqmf_2(x_hat)[:, :1, :]
+        x1_hat_ = self.pqmf_4(x_hat)[:, :1, :]
+
+        p2_, p2_fmap_ = self.combd_2(x2_)
+        y.append(p2_)
+        fmap.append(p2_fmap_)
+
+        p2_hat_, p2_fmap_hat_ = self.combd_2(x2_hat)
+        y_hat.append(p2_hat_)
+        fmap_hat.append(p2_fmap_hat_)
+
+        p1_, p1_fmap_ = self.combd_1(x1_)
+        y.append(p1_)
+        fmap.append(p1_fmap_)
+
+        p1_hat_, p1_fmap_hat_ = self.combd_1(x1_hat)
+        y_hat.append(p1_hat_)
+        fmap_hat.append(p1_fmap_hat_)
+
+        p2, p2_fmap = self.combd_2(x2_)
+        y.append(p2)
+        fmap.append(p2_fmap)
+
+        p2_hat, p2_fmap_hat = self.combd_2(x2_hat_)
+        y_hat.append(p2_hat)
+        fmap_hat.append(p2_fmap_hat)
+
+        p1, p1_fmap = self.combd_1(x1_)
+        y.append(p1)
+        fmap.append(p1_fmap)
+
+        p1_hat, p1_fmap_hat = self.combd_1(x1_hat_)
+        y_hat.append(p1_hat)
+        fmap_hat.append(p1_fmap_hat)
+
+        return y, y_hat, fmap, fmap_hat
+
+
+class MultiSubBandDiscriminator(torch.nn.Module):
+    def __init__(
+        self,
+        tkernels,
+        fkernel,
+        tchannels,
+        fchannels,
+        tstrides,
+        fstride,
+        tdilations,
+        fdilations,
+        tsubband,
+        n,
+        m,
+        freq_init_ch,
+    ):
+
+        super(MultiSubBandDiscriminator, self).__init__()
+
+        self.fsbd = SubBandDiscriminator(
+            init_channel=freq_init_ch,
+            channels=fchannels,
+            kernel=fkernel,
+            strides=fstride,
+            dilations=fdilations,
+        )
+
+        self.tsubband1 = tsubband[0]
+        self.tsbd1 = SubBandDiscriminator(
+            init_channel=self.tsubband1,
+            channels=tchannels,
+            kernel=tkernels[0],
+            strides=tstrides[0],
+            dilations=tdilations[0],
+        )
+
+        self.tsubband2 = tsubband[1]
+        self.tsbd2 = SubBandDiscriminator(
+            init_channel=self.tsubband2,
+            channels=tchannels,
+            kernel=tkernels[1],
+            strides=tstrides[1],
+            dilations=tdilations[1],
+        )
+
+        self.tsubband3 = tsubband[2]
+        self.tsbd3 = SubBandDiscriminator(
+            init_channel=self.tsubband3,
+            channels=tchannels,
+            kernel=tkernels[2],
+            strides=tstrides[2],
+            dilations=tdilations[2],
+        )
+
+        self.pqmf_n = PQMF(N=n, taps=256, cutoff=0.03, beta=10.0)
+        self.pqmf_m = PQMF(N=m, taps=256, cutoff=0.1, beta=9.0)
+
+    def forward(self, x, x_hat):
+        fmap = []
+        fmap_hat = []
+        y = []
+        y_hat = []
+
+        # Time analysis
+        xn = self.pqmf_n(x)
+        xn_hat = self.pqmf_n(x_hat)
+
+        q3, feat_q3 = self.tsbd3(xn[:, : self.tsubband3, :])
+        q3_hat, feat_q3_hat = self.tsbd3(xn_hat[:, : self.tsubband3, :])
+        y.append(q3)
+        y_hat.append(q3_hat)
+        fmap.append(feat_q3)
+        fmap_hat.append(feat_q3_hat)
+
+        q2, feat_q2 = self.tsbd2(xn[:, : self.tsubband2, :])
+        q2_hat, feat_q2_hat = self.tsbd2(xn_hat[:, : self.tsubband2, :])
+        y.append(q2)
+        y_hat.append(q2_hat)
+        fmap.append(feat_q2)
+        fmap_hat.append(feat_q2_hat)
+
+        q1, feat_q1 = self.tsbd1(xn[:, : self.tsubband1, :])
+        q1_hat, feat_q1_hat = self.tsbd1(xn_hat[:, : self.tsubband1, :])
+        y.append(q1)
+        y_hat.append(q1_hat)
+        fmap.append(feat_q1)
+        fmap_hat.append(feat_q1_hat)
+
+        # Frequency analysis
+        xm = self.pqmf_m(x)
+        xm_hat = self.pqmf_m(x_hat)
+
+        xm = xm.transpose(-2, -1)
+        xm_hat = xm_hat.transpose(-2, -1)
+
+        q4, feat_q4 = self.fsbd(xm)
+        q4_hat, feat_q4_hat = self.fsbd(xm_hat)
+        y.append(q4)
+        y_hat.append(q4_hat)
+        fmap.append(feat_q4)
+        fmap_hat.append(feat_q4_hat)
+
+        return y, y_hat, fmap, fmap_hat
+
+
 def feature_loss(fmap_r, fmap_g):
     loss = 0
     for dr, dg in zip(fmap_r, fmap_g):
@@ -505,6 +662,161 @@ def generator_loss(disc_outputs):
         loss += l
 
     return loss, gen_losses
+
+
+#
+
+
+class CoMBD(torch.nn.Module):
+    def __init__(self, filters, kernels, groups, strides, use_spectral_norm=False):
+        super(CoMBD, self).__init__()
+        norm_f = weight_norm if use_spectral_norm == False else spectral_norm
+        self.convs = nn.ModuleList()
+        init_channel = 1
+        for i, (f, k, g, s) in enumerate(zip(filters, kernels, groups, strides)):
+            self.convs.append(
+                norm_f(
+                    Conv1d(init_channel, f, k, s, padding=get_padding(k, 1), groups=g)
+                )
+            )
+            init_channel = f
+        self.conv_post = norm_f(Conv1d(filters[-1], 1, 3, 1, padding=get_padding(3, 1)))
+
+    def forward(self, x):
+        fmap = []
+        for l in self.convs:
+            x = l(x)
+            x = F.leaky_relu(x, 0.1)
+            fmap.append(x)
+        x = self.conv_post(x)
+        # fmap.append(x)
+        x = torch.flatten(x, 1, -1)
+        return x, fmap
+
+
+class MDC(torch.nn.Module):
+    def __init__(
+        self, in_channel, channel, kernel, stride, dilations, use_spectral_norm=False
+    ):
+        super(MDC, self).__init__()
+        norm_f = weight_norm if use_spectral_norm == False else spectral_norm
+        self.convs = torch.nn.ModuleList()
+        self.num_dilations = len(dilations)
+        for d in dilations:
+            self.convs.append(
+                norm_f(
+                    Conv1d(
+                        in_channel,
+                        channel,
+                        kernel,
+                        stride=1,
+                        padding=get_padding(kernel, d),
+                        dilation=d,
+                    )
+                )
+            )
+
+        self.conv_out = norm_f(
+            Conv1d(channel, channel, 3, stride=stride, padding=get_padding(3, 1))
+        )
+
+    def forward(self, x):
+        xs = None
+        for l in self.convs:
+            if xs is None:
+                xs = l(x)
+            else:
+                xs += l(x)
+
+        x = xs / self.num_dilations
+
+        x = self.conv_out(x)
+        x = F.leaky_relu(x, 0.1)
+        return x
+
+
+class SubBandDiscriminator(torch.nn.Module):
+    def __init__(
+        self,
+        init_channel,
+        channels,
+        kernel,
+        strides,
+        dilations,
+        use_spectral_norm=False,
+    ):
+        super(SubBandDiscriminator, self).__init__()
+        norm_f = weight_norm if use_spectral_norm == False else spectral_norm
+
+        self.mdcs = torch.nn.ModuleList()
+
+        for c, s, d in zip(channels, strides, dilations):
+            self.mdcs.append(MDC(init_channel, c, kernel, s, d))
+            init_channel = c
+        self.conv_post = norm_f(Conv1d(init_channel, 1, 3, padding=get_padding(3, 1)))
+
+    def forward(self, x):
+        fmap = []
+
+        for l in self.mdcs:
+            x = l(x)
+            fmap.append(x)
+        x = self.conv_post(x)
+        # fmap.append(x)
+        x = torch.flatten(x, 1, -1)
+
+        return x, fmap
+
+
+# adapted from
+# https://github.com/kan-bayashi/ParallelWaveGAN/tree/master/parallel_wavegan
+class PQMF(torch.nn.Module):
+    def __init__(self, N=4, taps=62, cutoff=0.15, beta=9.0):
+        super(PQMF, self).__init__()
+
+        self.N = N
+        self.taps = taps
+        self.cutoff = cutoff
+        self.beta = beta
+
+        QMF = sig.firwin(taps + 1, cutoff, window=("kaiser", beta))
+        H = np.zeros((N, len(QMF)))
+        G = np.zeros((N, len(QMF)))
+        for k in range(N):
+            constant_factor = (
+                (2 * k + 1)
+                * (np.pi / (2 * N))
+                * (np.arange(taps + 1) - ((taps - 1) / 2))
+            )  # TODO: (taps - 1) -> taps
+            phase = (-1) ** k * np.pi / 4
+            H[k] = 2 * QMF * np.cos(constant_factor + phase)
+
+            G[k] = 2 * QMF * np.cos(constant_factor - phase)
+
+        H = torch.from_numpy(H[:, None, :]).float()
+        G = torch.from_numpy(G[None, :, :]).float()
+
+        self.register_buffer("H", H)
+        self.register_buffer("G", G)
+
+        updown_filter = torch.zeros((N, N, N)).float()
+        for k in range(N):
+            updown_filter[k, k, 0] = 1.0
+        self.register_buffer("updown_filter", updown_filter)
+        self.N = N
+
+        self.pad_fn = torch.nn.ConstantPad1d(taps // 2, 0.0)
+
+    def forward(self, x):
+        return self.analysis(x)
+
+    def analysis(self, x):
+        return F.conv1d(x, self.H, padding=self.taps // 2, stride=self.N)
+
+    def synthesis(self, x):
+        x = F.conv_transpose1d(x, self.updown_filter * self.N, stride=self.N)
+        x = F.conv1d(x, self.G, padding=self.taps // 2)
+        return x
 
 
 import os
