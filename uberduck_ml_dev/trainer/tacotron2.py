@@ -5,19 +5,6 @@ __all__ = ["Tacotron2Loss", "Tacotron2Trainer", "config", "DEFAULTS"]
 # At the VERY TOP of your script (before any imports)
 import torch
 import os
-
-# Memory optimization
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"  # Reduce fragmentation
-
-# GPU performance tweaks
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = False  # Disable on RTX 2050
-torch.backends.cudnn.allow_tf32 = False
-torch.set_float32_matmul_precision('medium')  # For PyTorch 2.0+
-torch.backends.cudnn.deterministic = False
-
-
-
 # Cell
 from random import choice, randint
 import time
@@ -361,7 +348,7 @@ class Tacotron2Trainer(TTSTrainer):
         alignment_metrics = get_alignment_metrics(alignments)
         alignment_diagonalness = alignment_metrics["diagonalness"]
         alignment_max = alignment_metrics["max"]
-        weighted_score = alignment_max - alignment_diagonalness
+        wei0ghted_score = alignment_max - alignment_diagonalness
 
         sample_idx = randint(0, mel_out_postnet.size(0) - 1)
         audio = self.sample(mel=mel_out_postnet[sample_idx])
@@ -440,8 +427,6 @@ class Tacotron2Trainer(TTSTrainer):
     def train(self):
         torch.cuda.empty_cache()
         torch.backends.cuda.cufft_plan_cache.clear()
-        best_validation_loss = 1e3
-        best_inf_attsc = -99
         
         train_start_time = time.perf_counter()
         print("start train", train_start_time)
@@ -470,6 +455,10 @@ class Tacotron2Trainer(TTSTrainer):
                 model.module = module
             else:
                 model, optimizer, start_epoch = self.warm_start(model, optimizer)
+        
+        best_validation_loss = getattr(self, 'best_val_loss', 1e3)
+        best_inf_attsc = getattr(self, 'best_inf_attsc', 9e9)
+
 
         if self.fp16_run:
             scaler = amp.GradScaler()
@@ -604,7 +593,8 @@ class Tacotron2Trainer(TTSTrainer):
                         optimizer=optimizer,
                         iteration=epoch,
                         learning_rate=self.learning_rate,
-                        global_step=self.global_step
+                        global_step=self.global_step,
+                        best_validation_loss=best_validation_loss, # Save best validation loss
                     )
 
                 if current_val_score > best_inf_attsc:
@@ -617,6 +607,7 @@ class Tacotron2Trainer(TTSTrainer):
                         iteration=epoch,
                         learning_rate=self.learning_rate,
                         global_step=self.global_step,
+                        best_inf_attsc=best_inf_attsc, # Save best inference attention score
                     )
 
     def validate(self, **kwargs):
