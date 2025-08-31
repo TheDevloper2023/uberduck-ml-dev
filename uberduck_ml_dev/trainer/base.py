@@ -143,6 +143,12 @@ class TTSTrainer:
         if "global_step" in checkpoint:
             self.global_step = checkpoint["global_step"]
             print(f"Adjusted global step to {self.global_step}")
+        if "best_validation_loss" in checkpoint:
+            self.best_val_loss = checkpoint["best_validation_loss"]
+            print(f"Best_Validation_Loss is {self.best_val_loss}")
+        if "best_inf_attsc" in checkpoint:
+            self.best_inf_attsc = checkpoint["best_inf_attsc"]
+            print(f"best_inf_attsc is {self.best_inf_attsc")
         print("Ending warm_start", time.perf_counter())
         return model, optimizer, start_epoch
 
