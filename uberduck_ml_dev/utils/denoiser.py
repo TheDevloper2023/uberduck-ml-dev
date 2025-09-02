@@ -47,6 +47,7 @@ class Denoiser(torch.nn.Module):
             raise Exception("Mode {} if not supported".format(mode))
 
         with torch.no_grad():
+
             if isinstance(hifigan, iSTFTNetGenerator):
                 self.stft = TorchSTFT(filter_length=16, hop_length=4, win_length=16, device="cpu").to("cpu")
                 spec, phase = hifigan.vocoder(mel_input.to(hifigan.device))
@@ -70,13 +71,11 @@ class Denoiser(torch.nn.Module):
         """
         Strength is the amount of bias you want to be removed from the final audio.
         Note: A higher strength may remove too much information in the original audio.
-
         :param audio: Audio data
         :param strength: Amount of bias removal. Recommended range 10 - 50
         :return: Denoised audio
         :rtype: tensor
         """
-
         audio_spec, audio_angles = self.stft.transform(audio.cpu())
         audio_spec_denoised = audio_spec - self.bias_spec * strength
         audio_spec_denoised = torch.clamp(audio_spec_denoised, 0.0)
