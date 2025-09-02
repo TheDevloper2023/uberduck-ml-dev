@@ -1,3 +1,11 @@
+This is a fork of Uberduck that adds new features and fixes to the repository. Credits to the Uberduck community and the pony perversion project!
+
+Training Notebook: https://colab.research.google.com/gist/TheDevloper2023/8bded51fa2c7b9178462ee9fe4b3b0f0/uberduck-pipeline-training-but-awesome.ipynb?authuser=1#scrollTo=NVI9tAQFvO7x
+
+Synthesis Notebook: https://colab.research.google.com/drive/1wXWuhnw2pdfFy1L-pUzHfopW10W2GiJS#scrollTo=6hZdobBRWP_b
+
+
+---
 # 🦆 Uberduck TTS ![](https://img.shields.io/github/forks/uberduck-ai/uberduck-ml-dev) ![](https://img.shields.io/github/stars/uberduck-ai/uberduck-ml-dev) ![](https://img.shields.io/github/issues/uberduck-ai/uberduck-ml-dev)
 
 <h1>Table of Contents<span class="tocSkip"></span></h1>
@@ -38,9 +46,9 @@ An overview of the subpackages in this library:
 ## Installation
 
 ```
-conda create -n 'uberduck-ml-dev' python=3.8
+conda create -n 'uberduck-ml-dev'
 source activate uberduck-ml-dev
-pip install git+https://github.com/uberduck-ai/uberduck-ml-dev.git
+pip install git+https://github.com/TheDevloper2023/uberduck-ml-dev.git
 ```
 
 ## Development
@@ -54,7 +62,7 @@ pip install pre-commit black
 Clone the repository:
 
 ```bash
-git clone git@github.com:uberduck-ai/uberduck-ml-dev.git
+git clone https://github.com/TheDevloper2023/uberduck-ml-dev.git
 ```
 
 Install required Git hooks:
@@ -78,3 +86,6 @@ python -m pytest
 ### 🔧 Troubleshooting
 
 - It is important for you to spell the name of your user and repo correctly in `settings.ini`. If you change the name of the repo, you have to make the appropriate changes in `settings.ini`
+
+### Spoon
+<img src="https://pngimg.com/uploads/spoon/spoon_PNG3044.png">Spoon<img>

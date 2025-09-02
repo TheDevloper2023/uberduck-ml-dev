@@ -1,12 +1,19 @@
 __all__ = ["Tacotron2Loss", "Tacotron2Trainer", "config", "DEFAULTS"]
 
+
 from random import randint
+
+__all__ = ["Tacotron2Loss", "Tacotron2Trainer", "config", "DEFAULTS"]
+
+# At the VERY TOP of your script (before any imports)
+import torch
+import os
+# Cell
 import time
 from typing import List
 from random import choice
 import time
 
-import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -113,6 +120,12 @@ class Tacotron2Trainer(TTSTrainer):
         if not self.sample_inference_speaker_ids:
             self.sample_inference_speaker_ids = list(range(self.n_speakers))
 
+        # f(x) = M * b ^ ((x - d) / c)
+        self.lrdecay_max = self.hparams.learning_rate  # M
+        self.lrdecay_min = self.hparams.lrdecay_min  # m
+        self.lrdecay_rate = self.lrdecay_min / self.lrdecay_max  # b = m / M
+        self.lrdecay_start = self.hparams.lrdecay_start  # d
+        self.lrdecay_steps = self.hparams.lrdecay_steps  # c
     def log_training(
         self,
         model,
@@ -345,6 +358,9 @@ class Tacotron2Trainer(TTSTrainer):
         alignment_max = alignment_metrics["max"]
         sample_idx = randint(0, self.batch_size)
         audio = self.sample(mel=y_pred["mel_outputs_postnet"][sample_idx])
+        weighted_score = alignment_max - alignment_diagonalness
+
+  
 
         self.log(
             "AlignmentDiagonalness/val", self.global_step, scalar=alignment_diagonalness
@@ -415,11 +431,13 @@ class Tacotron2Trainer(TTSTrainer):
             shuffle=(sampler is None),
             sampler=sampler,
             collate_fn=collate_fn,
+
         )
         return train_set, val_set, train_loader, sampler, collate_fn
 
     def train(self):
-
+        torch.cuda.empty_cache()
+        torch.backends.cuda.cufft_plan_cache.clear()
         train_start_time = time.perf_counter()
         print("start train", train_start_time)
         train_set, val_set, train_loader, sampler, collate_fn = self.initialize_loader()
@@ -448,9 +466,13 @@ class Tacotron2Trainer(TTSTrainer):
                 model.module = module
             else:
                 model, optimizer, start_epoch = self.warm_start(model, optimizer)
+        
+        best_validation_loss = getattr(self, 'best_val_loss', 1e3)
+        best_inf_attsc = getattr(self, 'best_inf_attsc', 9e9)
+
 
         if self.fp16_run:
-            scaler = GradScaler()
+            scaler = amp.GradScaler()
 
         start_time, previous_start_time = time.perf_counter(), time.perf_counter()
         for epoch in range(start_epoch, self.epochs):
@@ -461,9 +483,47 @@ class Tacotron2Trainer(TTSTrainer):
                 sampler.set_epoch(epoch)
             for batch_idx, batch in enumerate(train_loader):
                 self.global_step += 1
+
                 # NOTE (Sam): model.module.zero_grad() needed for distributed run?
                 model.zero_grad()
 
+
+                # y = M * b ^ ( ( x - d ) / c )
+                # Exponential decay similar to Keras
+                self.learning_rate = self.lrdecay_max * (
+                    self.lrdecay_rate
+                    ** ((self.global_step - self.lrdecay_start) / (self.lrdecay_steps))
+                )
+                self.learning_rate = max(
+                    min(self.learning_rate, self.lrdecay_max), self.lrdecay_min
+                )
+                for param in optimizer.param_groups:
+                    param["lr"] = self.learning_rate
+
+                model.zero_grad()
+                if self.distributed_run:
+                    X, y = model.module.parse_batch(batch)
+                else:
+                    X, y = model.parse_batch(batch)
+                if self.fp16_run:
+                    with amp.autocast(device_type='cuda', enabled=self.fp16_run):
+                        y_pred = model(X)
+
+                        (
+                            mel_loss,
+                            gate_loss,
+                            mel_loss_batch,
+                            gate_loss_batch,
+                        ) = criterion(y_pred, y)
+                        loss = mel_loss + gate_loss
+                        loss_batch = mel_loss_batch + gate_loss_batch
+                else:
+                    y_pred = model(X)
+                    mel_loss, gate_loss, mel_loss_batch, gate_loss_batch = criterion(
+                        y_pred, y
+                    )
+                    loss = mel_loss + gate_loss
+                    loss_batch = mel_loss_batch + gate_loss_batch
                 # NOTE (Sam): Could call subsets directly in function arguments since model_input is only reused in logging.
                 model_input = batch.subset(
                     [
@@ -528,9 +588,10 @@ class Tacotron2Trainer(TTSTrainer):
                     grad_norm=grad_norm,
                     step_duration_seconds=step_duration_seconds,
                 )
-                previous_start_time = start_time
-                start_time = time.perf_counter()
-                log_str = f"epoch: {epoch}/{self.epochs} | batch: {batch_idx}/{len(train_loader)} | loss: {reduced_loss:.3f} | mel: {reduced_mel_loss:.3f} | gate: {reduced_gate_loss:.3f} | t: {start_time - previous_start_time:.3f}s | w: {(time.perf_counter() - train_start_time)/(60*60):.3f}h"
+
+                log_stop = time.time()
+                log_str = f"epoch: {epoch}/{self.epochs} | batch: {batch_idx}/{len(train_loader)} | loss: {reduced_mel_loss:.2f} | mel: {reduced_loss:.2f} | gate: {reduced_gate_loss:.3f} | t: {start_time - previous_start_time:.2f}s | w: {(time.perf_counter() - train_start_time)/(60*60):.2f}h | lr: {self.learning_rate:.4e}"
+
                 if self.distributed_run:
                     log_str += f" | rank: {self.rank}"
                 print(log_str)
@@ -547,7 +608,7 @@ class Tacotron2Trainer(TTSTrainer):
             # NOTE (Zach): There's no need to validate in debug mode since we're not really training.
             # NOTE (Sam): What if I want to debug the validator?
             if self.is_validate:
-                self.validate(
+                current_val_loss, current_val_score = self.validate(
                     model=model,
                     val_set=val_set,
                     collate_fn=collate_fn,
@@ -556,6 +617,33 @@ class Tacotron2Trainer(TTSTrainer):
             if self.debug:
                 self.loss.append(reduced_loss)
                 continue
+
+                if current_val_loss < best_validation_loss:
+                    best_validation_loss = current_val_loss
+                    print("Saving Best_Val_Model")
+                    print(f"Validation loss: {current_val_loss:.2f}")
+                    self.save_checkpoint(
+                        f"{self.checkpoint_name}_Best_Val_Model",
+                        model=model,
+                        optimizer=optimizer,
+                        iteration=epoch,
+                        learning_rate=self.learning_rate,
+                        global_step=self.global_step,
+                        best_validation_loss=best_validation_loss, # Save best validation loss
+                    )
+
+                if current_val_score > best_inf_attsc:
+                    best_inf_attsc = current_val_score
+                    print(f"Saving Best_Inf_AttSC model (score: {current_val_score:.4f})")
+                    self.save_checkpoint(
+                        f"{self.checkpoint_name}_Best_Inf_AttSC",
+                        model=model,
+                        optimizer=optimizer,
+                        iteration=epoch,
+                        learning_rate=self.learning_rate,
+                        global_step=self.global_step,
+                        best_inf_attsc=best_inf_attsc, # Save best inference attention score
+                    )
 
     def validate(self, **kwargs):
         val_start_time = time.perf_counter()
@@ -657,11 +745,18 @@ class Tacotron2Trainer(TTSTrainer):
                 speakers_val=speakers_val,
             )
 
+        _, mel_out_postnet, gate_outputs, alignments, *_ = y_pred
+        alignment_metrics = get_alignment_metrics(alignments)
+        alignment_diagonalness = alignment_metrics["diagonalness"]
+        alignment_max = alignment_metrics["max"]
+
+        weighted_score = alignment_max - alignment_diagonalness
         model.train()
 
         val_log_str = f"Validation loss: {mean_loss:.3f} | mel: {mel_loss:.3f} | gate: {mean_gate_loss:.3f} | t: {time.perf_counter() - val_start_time:.3f}s"
         print(val_log_str)
 
+        return mean_loss, weighted_score
     @property
     def val_dataset_args(self):
 
@@ -689,7 +784,11 @@ class Tacotron2Trainer(TTSTrainer):
         }
 
 
+# Cell
+from ..vendor.tfcompat.hparam import HParams
+from .base import DEFAULTS as TRAINER_DEFAULTS
+from ..models.tacotron2 import DEFAULTS as TACOTRON2_DEFAULTS
+
 config = TRAINER_DEFAULTS.values()
 config.update(TACOTRON2_DEFAULTS.values())
-config.update({"sample_inference_text": "Duck party on aisle 6."})
 DEFAULTS = HParams(**config)

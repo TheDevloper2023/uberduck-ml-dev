@@ -126,13 +126,14 @@ class TextMelDataset(Dataset):
         oversample_weights=None,
         intersperse_text: bool = False,
         intersperse_token: int = 0,
+        relative=False,
         compute_gst=None,
     ):
         super().__init__()
         path = audiopaths_and_text
         oversample_weights = oversample_weights or {}
         self.audiopaths_and_text = oversample(
-            load_filepaths_and_text(path), oversample_weights
+            load_filepaths_and_text(path, relative=relative), oversample_weights
         )
         self.text_cleaners = text_cleaners
         self.p_arpabet = p_arpabet
@@ -213,6 +214,7 @@ class TextMelDataset(Dataset):
             "speaker_id": speaker_id,
             "embedded_gst": None,
             "f0": None,
+            "path": path,
         }
 
         if self.compute_gst:
@@ -263,7 +265,6 @@ class TextMelCollate:
 
     def set_frames_per_step(self, n_frames_per_step):
         """Set n_frames_step.
-
         This is used to train with gradual training, where we start with a large
         n_frames_per_step in order to learn attention quickly and decrease it
         over the course of training in order to increase accuracy. Gradual training
@@ -539,7 +540,6 @@ class DistributedBucketSampler(DistributedSampler):
     Maintain similar input lengths in a batch.
     Length groups are specified by boundaries.
     Ex) boundaries = [b1, b2, b3] -> any batch is included either {x | b1 < length(x) <=b2} or {x | b2 < length(x) <= b3}.
-
     It removes samples which are not included in the boundaries.
     Ex) boundaries = [b1, b2, b3] -> any x s.t. length(x) <= b1 or length(x) > b3 are discarded.
     """

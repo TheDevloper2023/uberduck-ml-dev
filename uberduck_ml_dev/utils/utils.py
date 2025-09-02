@@ -32,8 +32,19 @@ from torch.nn import functional as F
 import torch.distributed as dist
 
 
-def load_filepaths_and_text(filename: str, split: str = "|"):
+def load_filepaths_and_text(filename: str, split: str = "|", relative = False):
     with open(filename, encoding="utf-8") as f:
+        if relative:
+            filepaths_and_text = []
+            for line in f:
+                data = line.strip().split(split)
+                data[0] = relative + data[0]
+                try:
+                    data[2]
+                except:
+                    data.append("0")
+                filepaths_and_text.append(data)
+            return filepaths_and_text
         filepaths_and_text = [line.strip().split(split) for line in f]
     return filepaths_and_text
 
@@ -50,30 +61,22 @@ def window_sumsquare(
     """
     # from librosa 0.6
     Compute the sum-square envelope of a window function at a given hop length.
-
     This is used to estimate modulation effects induced by windowing
     observations in short-time fourier transforms.
-
     Parameters
     ----------
     window : string, tuple, number, callable, or list-like
         Window specification, as in `get_window`
-
     n_frames : int > 0
         The number of analysis frames
-
     hop_length : int > 0
         The number of samples to advance between frames
-
     win_length : [optional]
         The length of the window function.  By default, this matches `n_fft`.
-
     n_fft : int > 0
         The length of each analysis frame.
-
     dtype : np.dtype
         The data type of the output
-
     Returns
     -------
     wss : np.ndarray, shape=`(n_fft + hop_length * (n_frames - 1))`
