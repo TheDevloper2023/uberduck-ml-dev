@@ -28,6 +28,9 @@ from ..vocoders.istftnet import iSTFTNetGenerator, TorchSTFT
 class Denoiser(torch.nn.Module):
     """WaveGlow denoiser, adapted for HiFi-GAN"""
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+
     def __init__(
         self, hifigan, filter_length=1024, n_overlap=4, win_length=1024, mode="zeros"
     ):
@@ -36,20 +39,19 @@ class Denoiser(torch.nn.Module):
             filter_length=filter_length,
             hop_length=int(filter_length / n_overlap),
             win_length=win_length,
-            device=torch.device("cpu"),
-        )
+        ).to(Denoiser.device)
 
         if mode == "zeros":
-            mel_input = torch.zeros((1, 80, 88))
+            mel_input = torch.zeros((1, 80, 88)).to(Denoiser.device)
         elif mode == "normal":
-            mel_input = torch.randn((1, 80, 88))
+            mel_input = torch.randn((1, 80, 88)).to(Denoiser.device)
         else:
             raise Exception("Mode {} if not supported".format(mode))
 
         with torch.no_grad():
             if isinstance(hifigan, iSTFTNetGenerator):
                 self.stft = TorchSTFT(filter_length=16, hop_length=4, win_length=16, device="cpu").to("cpu")
-                spec, phase = hifigan.vocoder(mel_input.to(hifigan.device))
+                spec, phase = hifigan.vocoder(mel_input.to(Denoiser.device))
                 y_g_hat = self.stft.inverse(spec.cpu(), phase.cpu())
                 bias_audio = (
                     y_g_hat
@@ -58,11 +60,11 @@ class Denoiser(torch.nn.Module):
                 )
             else:
                 bias_audio = (
-                    hifigan.vocoder.forward(mel_input.to(hifigan.device))
+                    hifigan.vocoder.forward(mel_input.to(Denoiser.device))
                     .view(1, -1)
                     .float()
                 )
-            bias_spec, _ = self.stft.transform(bias_audio.cpu())
+            bias_spec, _ = self.stft.transform(bias_audio)
 
         self.register_buffer("bias_spec", bias_spec[:, :, 0][:, :, None])
 
@@ -77,8 +79,8 @@ class Denoiser(torch.nn.Module):
         :rtype: tensor
         """
 
-        audio_spec, audio_angles = self.stft.transform(audio.cpu())
+        audio_spec, audio_angles = self.stft.transform(audio.to(Denoiser.device)).float()
         audio_spec_denoised = audio_spec - self.bias_spec * strength
         audio_spec_denoised = torch.clamp(audio_spec_denoised, 0.0)
-        audio_denoised = self.stft.inverse(audio_spec_denoised.cpu(), audio_angles)
+        audio_denoised = self.stft.inverse(audio_spec_denoised, audio_angles)
         return audio_denoised
