@@ -91,7 +91,7 @@ class Tacotron2Trainer(TTSTrainer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
+        self.ignore_layers = []
         if self.hparams.get("gst_type") == "torchmoji":
             assert self.hparams.get(
                 "torchmoji_vocabulary_file"
