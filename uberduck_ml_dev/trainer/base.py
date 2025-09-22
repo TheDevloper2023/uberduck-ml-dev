@@ -81,7 +81,7 @@ class TTSTrainer:
 
     def load_checkpoint(self):
         torch.serialization.add_safe_globals([CookieTTS.utils.utils_hparam.HParams])
-        return torch.load(self.warm_start_name, map_location=self.device, weights_only=True) #Pytorch 2.6 type shit
+        return torch.load(self.warm_start_name, map_location=self.device, weights_only=False) #Pytorch 2.6 type shit
 
     def log(self, tag, step, scalar=None, audio=None, image=None, figure=None):
         if self.rank is not None and self.rank != 0:
