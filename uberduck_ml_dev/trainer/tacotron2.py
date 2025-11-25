@@ -20,6 +20,8 @@ from ..utils.plot import save_figure_to_numpy
 from ..utils.utils import reduce_tensor
 from ..monitoring.statistics import get_alignment_metrics
 
+import atexit, signal
+
 
 class Tacotron2Loss(nn.Module):
     def __init__(self, pos_weight):
@@ -463,6 +465,32 @@ class Tacotron2Trainer(TTSTrainer):
         if self.fp16_run:
             scaler = amp.GradScaler()
 
+        # Save when the training stops / crashes
+
+        def _save_on_shutdown(signum=None, frame=None):
+            print("\n" + "Saving checkpoint at step {self.global_step}")
+            try:
+                self.save_checkpoint(
+                    f"{self.checkpoint_name}_step_{self.global_step}",
+                    model=model,
+                    optimizer=optimizer,
+                    iteration=epoch,
+                    learning_rate=self.learning_rate,
+                    global_step=self.global_step,
+                )
+                print("E-Checkpoint saved!")
+            except Exception as e:
+                print("Failed to save E-Checkpoint due: ", e)
+            finally:
+                if signum is not None:
+                    os._exit(0) # force exit safely
+
+
+        #Register
+        atexit.register(_save_on_shutdown)
+        signal.signal(signal.SIGTERM, _save_on_shutdown)
+        signal.signal(signal.SIGINT, _save_on_shutdown)
+
         start_time, previous_start_time = time.perf_counter(), time.perf_counter()
         for epoch in range(start_epoch, self.epochs):
             #             train_loader, sampler, collate_fn = self.adjust_frames_per_step(
@@ -737,6 +765,11 @@ class Tacotron2Trainer(TTSTrainer):
 from ..vendor.tfcompat.hparam import HParams
 from .base import DEFAULTS as TRAINER_DEFAULTS
 from ..models.tacotron2 import DEFAULTS as TACOTRON2_DEFAULTS
+
+
+# Shutdown
+
+
 
 config = TRAINER_DEFAULTS.values()
 config.update(TACOTRON2_DEFAULTS.values())
