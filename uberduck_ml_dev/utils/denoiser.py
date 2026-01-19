@@ -45,6 +45,17 @@ class Denoiser(torch.nn.Module):
             mel_input = torch.zeros((1, 80, 88)).to(Denoiser.device)
         elif mode == "normal":
             mel_input = torch.randn((1, 80, 88)).to(Denoiser.device)
+        elif mode == "ones":
+            mel_input = torch.ones((1, 80, 88)).to(Denoiser.device)
+        elif mode == "half":
+            mel_input = torch.full((1, 80, 88), 0.5).to(Denoiser.device)
+        elif mode == "normal_alt":
+            mel_input = torch.rand((1, 80, 88)).to(Denoiser.device)
+        elif mode == "sinusoid": #This one was made by chatgpt, I will admit it
+            t = torch.linspace(0, 2 * math.pi, steps=88)      # 88 time steps
+            wave = torch.sin(t)                                # sine wave
+            mel_input = wave.repeat(80, 1).unsqueeze(0)       # repeat for 80 mel channels
+            mel_input = mel_input.to(Denoiser.device)
         else:
             raise Exception("Mode {} if not supported".format(mode))
 
