@@ -39,7 +39,7 @@ class Denoiser(torch.nn.Module):
             filter_length=filter_length,
             hop_length=int(filter_length / n_overlap),
             win_length=win_length,
-        ).to(Denoiser.device)
+        )
 
         if mode == "zeros":
             mel_input = torch.zeros((1, 80, 88)).to(Denoiser.device)
