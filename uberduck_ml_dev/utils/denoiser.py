@@ -39,7 +39,8 @@ class Denoiser(torch.nn.Module):
             filter_length=filter_length,
             hop_length=int(filter_length / n_overlap),
             win_length=win_length,
-        ).to(Denoiser.device)
+            device=Denoiser.device
+        )
 
         if mode == "zeros":
             mel_input = torch.zeros((1, 80, 88)).to(Denoiser.device)
@@ -61,7 +62,7 @@ class Denoiser(torch.nn.Module):
 
         with torch.no_grad():
             if isinstance(hifigan, iSTFTNetGenerator):
-                self.stft = TorchSTFT(filter_length=16, hop_length=4, win_length=16, device=Denoiser.device).to(Denoiser.device)
+                self.stft = TorchSTFT(filter_length=16, hop_length=4, win_length=16, device=Denoiser.device)
                 spec, phase = hifigan.vocoder(mel_input.to(Denoiser.device))
                 y_g_hat = self.stft.inverse(spec.cpu(), phase.cpu())
                 bias_audio = (
