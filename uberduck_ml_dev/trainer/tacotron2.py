@@ -116,7 +116,7 @@ class GuidedAttentionLoss(torch.nn.Module):
 
 
 class Tacotron2Loss(nn.Module):
-    def __init__(self, pos_weight, guided_attn_sigma=0.4):
+    def __init__(self, pos_weight, guided_attn_sigma=0.4, guided_attn_weight=0.05):
         if pos_weight is not None:
             self.pos_weight = torch.tensor(pos_weight)
         else:
@@ -125,6 +125,7 @@ class Tacotron2Loss(nn.Module):
         super().__init__()
 
         self.guided_attn = GuidedAttentionLoss(guided_attn_sigma)
+        self.guided_attn_weight = guided_attn_weight
 
     def forward(self, model_output: List, target: List):
         mel_target, gate_target = target[0], target[1]
@@ -144,7 +145,7 @@ class Tacotron2Loss(nn.Module):
 
         diag_loss = self.guided_attn(alignments, input_lengths=target[2], output_lengths=mel_lengths)
 
-        return mel_loss, gate_loss, mel_loss_batch, gate_loss_batch, diag_loss
+        return mel_loss, gate_loss, mel_loss_batch, gate_loss_batch, (diag_loss * self.guided_attn_weight)
 
 
 # Cell
@@ -541,7 +542,9 @@ class Tacotron2Trainer(TTSTrainer):
         print("start train", train_start_time)
         train_set, val_set, train_loader, sampler, collate_fn = self.initialize_loader()
         criterion = Tacotron2Loss(
-            pos_weight=self.pos_weight
+            pos_weight=self.pos_weight,
+            guided_attn_sigma=self.hparams.DiagonalGuidedAttention_sigma,
+            guided_attn_weight=self.hparams.diag_att_weight
         )  # keep higher than 5 to make clips not stretch on
 
         model = Tacotron2(self.hparams)
@@ -893,4 +896,8 @@ from ..models.tacotron2 import DEFAULTS as TACOTRON2_DEFAULTS
 
 config = TRAINER_DEFAULTS.values()
 config.update(TACOTRON2_DEFAULTS.values())
+config.update({ #Guided Attnetion Loss related hyperparameters
+"diag_att_weight": 0.05, # 'dumb' guided attention. Simply punishes the model for attention that is non-diagonal.
+"DiagonalGuidedAttention_sigma": 0.5, #  how to *curve?* the attention loss? Just leave this one alone.
+})
 DEFAULTS = HParams(**config)
