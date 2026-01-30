@@ -20,11 +20,103 @@ from ..utils.plot import save_figure_to_numpy
 from ..utils.utils import reduce_tensor
 from ..monitoring.statistics import get_alignment_metrics
 
+
 import atexit, signal
+
+@torch.jit.script
+def get_mask_from_lengths(lengths: torch.Tensor, max_len:int = 0):
+    if max_len == 0:
+        max_len = int(torch.max(lengths).item())
+    ids = torch.arange(0, max_len, device=lengths.device, dtype=torch.long)
+    mask = (ids < lengths.unsqueeze(1))
+    return mask
+
+class GuidedAttentionLoss(torch.nn.Module):
+    """Guided attention loss function module.
+    This module calculates the guided attention loss described in `Efficiently Trainable Text-to-Speech System Based
+    on Deep Convolutional Networks with Guided Attention`_, which forces the attention to be diagonal.
+    .. _`Efficiently Trainable Text-to-Speech System Based on Deep Convolutional Networks with Guided Attention`:
+        https://arxiv.org/abs/1710.08969
+    """
+    def __init__(self, sigma=0.4, reset_always=True):
+        """Initialize guided attention loss module.
+        Args:
+            sigma (float, optional): Standard deviation to control how close attention to a diagonal.
+            reset_always (bool, optional): Whether to always reset masks.
+        """
+        super(GuidedAttentionLoss, self).__init__()
+        self.sigma = sigma
+        self.reset_always = reset_always
+        self.guided_attn_masks = None
+        self.masks = None
+    
+    def _reset_masks(self):
+        self.guided_attn_masks = None
+        self.masks = None
+    
+    def forward(self, att_ws, ilens, olens):
+        """Calculate forward propagation.
+        Args:
+            att_ws (Tensor): Batch of attention weights (B, T_max_out, T_max_in).
+            ilens (LongTensor): Batch of input lenghts (B,).
+            olens (LongTensor): Batch of output lenghts (B,).
+        Returns:
+            Tensor: Guided attention loss value.
+        """
+        if self.guided_attn_masks is None:
+            self.guided_attn_masks = self._make_guided_attention_masks(ilens, olens).to(att_ws.device)
+        if self.masks is None:
+            self.masks = self._make_masks(ilens, olens).to(att_ws.device)
+        B, mel_T, enc_T = self.guided_attn_masks.shape
+        losses = self.guided_attn_masks * att_ws[:, :mel_T, :enc_T]
+        loss = torch.sum(losses.masked_select(self.masks)) / torch.sum(olens) # get mean along B and mel_T
+        if self.reset_always:
+            self._reset_masks()
+        return loss
+
+    def _make_guided_attention_masks(self, ilens, olens):
+        n_batches = ilens.shape[0]
+        max_ilen = int(ilens.max().item())
+        max_olen = int(olens.max().item())
+        guided_attn_masks = torch.zeros((n_batches, max_olen, max_ilen))
+        for idx, (ilen, olen) in enumerate(zip(ilens, olens)):
+            guided_attn_masks[idx, :olen, :ilen] = self._make_guided_attention_mask(ilen, olen, self.sigma)
+        return guided_attn_masks
+
+    @staticmethod
+    def _make_guided_attention_mask(ilen, olen, sigma):
+        """Make guided attention mask.
+        """
+        grid_x, grid_y = torch.meshgrid(torch.arange(olen, device=olen.device), torch.arange(ilen, device=ilen.device))
+        grid_x, grid_y = grid_x.float().to(olen.device), grid_y.float().to(ilen.device)
+        return 1.0 - torch.exp(-(grid_y / ilen - grid_x / olen) ** 2 / (2 * (sigma ** 2)))
+
+    @staticmethod
+    def _make_masks(ilens, olens):
+        """Make masks indicating non-padded part.
+        Args:
+            ilens (LongTensor or List): Batch of lengths (B,).
+            olens (LongTensor or List): Batch of lengths (B,).
+        Returns:
+            Tensor: Mask tensor indicating non-padded part.
+        """
+        in_masks = get_mask_from_lengths(ilens)  # (B, T_in)
+        out_masks = get_mask_from_lengths(olens)  # (B, T_out)
+        return out_masks.unsqueeze(-1) & in_masks.unsqueeze(-2)  # (B, T_out, T_in)
+
+
+
+
+
+
+
+
+
+
 
 
 class Tacotron2Loss(nn.Module):
-    def __init__(self, pos_weight):
+    def __init__(self, pos_weight, guided_attn_sigma=0.4):
         if pos_weight is not None:
             self.pos_weight = torch.tensor(pos_weight)
         else:
@@ -32,11 +124,13 @@ class Tacotron2Loss(nn.Module):
 
         super().__init__()
 
+        self.guided_attn = GuidedAttentionLoss(guided_attn_sigma)
+
     def forward(self, model_output: List, target: List):
         mel_target, gate_target = target[0], target[1]
         mel_target.requires_grad = False
         gate_target.requires_grad = False
-        mel_out, mel_out_postnet, gate_out, _ = model_output
+        mel_out, mel_out_postnet, gate_out, alignments, mel_lengths = model_output
         mel_loss_batch = nn.MSELoss(reduction="none")(mel_out, mel_target).mean(
             axis=[1, 2]
         ) + nn.MSELoss(reduction="none")(mel_out_postnet, mel_target).mean(axis=[1, 2])
@@ -48,7 +142,9 @@ class Tacotron2Loss(nn.Module):
         )(gate_out, gate_target).mean(axis=[1])
         gate_loss = torch.mean(gate_loss_batch)
 
-        return mel_loss, gate_loss, mel_loss_batch, gate_loss_batch
+        diag_loss = self.guided_attn(alignments, input_lengths=target[2], output_lengths=mel_lengths)
+
+        return mel_loss, gate_loss, mel_loss_batch, gate_loss_batch, diag_loss
 
 
 # Cell
@@ -137,6 +233,8 @@ class Tacotron2Trainer(TTSTrainer):
         gate_loss_batch,
         grad_norm,
         step_duration_seconds,
+
+        guided_loss,
     ):
         self.log("Loss/train", self.global_step, scalar=loss)
         self.log("MelLoss/train", self.global_step, scalar=mel_loss)
@@ -148,6 +246,7 @@ class Tacotron2Trainer(TTSTrainer):
             self.global_step,
             scalar=step_duration_seconds,
         )
+        self.log("GuidedLoss/train", self.global_step, scalar=guided_loss)
 
         batch_levels = X[5]
         batch_levels_unique = torch.unique(batch_levels)
@@ -176,6 +275,7 @@ class Tacotron2Trainer(TTSTrainer):
             alignment_metrics = get_alignment_metrics(alignments)
             alignment_diagonalness = alignment_metrics["diagonalness"]
             alignment_max = alignment_metrics["max"]
+            attention_score = alignment_max - alignment_diagonalness
             sample_idx = randint(0, mel_out_postnet.size(0) - 1)
             audio = self.sample(mel=mel_out_postnet[sample_idx])
             self.log(
@@ -183,6 +283,8 @@ class Tacotron2Trainer(TTSTrainer):
                 self.global_step,
                 scalar=alignment_diagonalness,
             )
+
+            self.log("AttSC/train", self.global_step, scalar=attention_score)
             self.log("AlignmentMax/train", self.global_step, scalar=alignment_max)
             self.log("AudioSample/train", self.global_step, audio=audio)
             self.log(
@@ -319,11 +421,16 @@ class Tacotron2Trainer(TTSTrainer):
         mel_loss_val,
         gate_loss_val,
         speakers_val,
+
+        # New Stuff
+        weighted_score,
+        guided_loss,
     ):
         self.log("Loss/val", self.global_step, scalar=mean_loss)
         self.log("MelLoss/val", self.global_step, scalar=mean_mel_loss)
         self.log("GateLoss/val", self.global_step, scalar=mean_gate_loss)
-
+        self.log("GuidedLoss/val", self.global_step, scalar=guided_loss)
+        self.log("AttSC/val", self.global_step, scalar=weighted_score)
         val_levels = speakers_val
         val_levels_unique = torch.unique(val_levels)
         for l in val_levels_unique:
@@ -529,15 +636,16 @@ class Tacotron2Trainer(TTSTrainer):
                             gate_loss,
                             mel_loss_batch,
                             gate_loss_batch,
+                            guided_loss,
                         ) = criterion(y_pred, y)
-                        loss = mel_loss + gate_loss
+                        loss = mel_loss + gate_loss + guided_loss 
                         loss_batch = mel_loss_batch + gate_loss_batch
                 else:
                     y_pred = model(X)
-                    mel_loss, gate_loss, mel_loss_batch, gate_loss_batch = criterion(
+                    mel_loss, gate_loss, mel_loss_batch, gate_loss_batch, guided_loss = criterion(
                         y_pred, y
                     )
-                    loss = mel_loss + gate_loss
+                    loss = mel_loss + gate_loss + guided_loss
                     loss_batch = mel_loss_batch + gate_loss_batch
 
                 if self.distributed_run:
@@ -584,6 +692,8 @@ class Tacotron2Trainer(TTSTrainer):
                     reduced_gate_loss_batch,
                     grad_norm,
                     step_duration_seconds,
+
+                    guided_loss,
                 )
                 log_stop = time.time()
                 log_str = f"epoch: {epoch}/{self.epochs} | batch: {batch_idx}/{len(train_loader)} | loss: {reduced_mel_loss:.2f} | mel: {reduced_loss:.2f} | gate: {reduced_gate_loss:.3f} | t: {start_time - previous_start_time:.2f}s | w: {(time.perf_counter() - train_start_time)/(60*60):.2f}h | lr: {self.learning_rate:.4e}"
@@ -677,7 +787,7 @@ class Tacotron2Trainer(TTSTrainer):
                     speakers_val.append(X[5])
                 
                 y_pred = model(X)
-                mel_loss, gate_loss, mel_loss_batch, gate_loss_batch = criterion(
+                mel_loss, gate_loss, mel_loss_batch, gate_loss_batch, guided_loss = criterion(
                     y_pred, y
                 )
                 if self.distributed_run:
@@ -691,15 +801,19 @@ class Tacotron2Trainer(TTSTrainer):
                         mel_loss_batch, self.world_size
                     )
 
+                    reducued_guided_loss = reduce_tensor(guided_loss, self.world_size).item()
+
                 else:
                     reduced_mel_loss = mel_loss.item()
                     reduced_gate_loss = gate_loss.item()
                     reduced_mel_loss_val = mel_loss_batch.detach()
                     reduced_gate_loss_val = gate_loss_batch.detach()
+                    reducued_guided_loss = guided_loss.item()
+
 
                 total_mel_loss_val.append(reduced_mel_loss_val)
                 total_gate_loss_val.append(reduced_gate_loss_val)
-                reduced_val_loss = reduced_mel_loss + reduced_gate_loss
+                reduced_val_loss = reduced_mel_loss + reduced_gate_loss + reducued_guided_loss
                 total_mel_loss += reduced_mel_loss
                 total_gate_loss += reduced_gate_loss
                 total_loss += reduced_val_loss
@@ -710,17 +824,7 @@ class Tacotron2Trainer(TTSTrainer):
             total_mel_loss_val = torch.hstack(total_mel_loss_val)
             total_gate_loss_val = torch.hstack(total_gate_loss_val)
             speakers_val = torch.hstack(speakers_val)
-            self.log_validation(
-                X,
-                y_pred,
-                y,
-                mean_loss,
-                mean_mel_loss,
-                mean_gate_loss,
-                total_mel_loss_val,
-                total_gate_loss_val,
-                speakers_val,
-            )
+
 
         _, mel_out_postnet, gate_outputs, alignments, *_ = y_pred
         alignment_metrics = get_alignment_metrics(alignments)
@@ -732,6 +836,22 @@ class Tacotron2Trainer(TTSTrainer):
 
         val_log_str = f"Validation loss: {mean_loss:.2f} | mel: {mel_loss:.2f} | gate: {mean_gate_loss:.3f} | t: {time.perf_counter() - val_start_time:.2f}s"
         print(val_log_str)
+
+        self.log_validation(
+                X,
+                y_pred,
+                y,
+                mean_loss,
+                mean_mel_loss,
+                mean_gate_loss,
+                total_mel_loss_val,
+                total_gate_loss_val,
+                speakers_val,
+
+                # New Stuff
+                weighted_score,
+                guided_loss,
+            )
 
         return mean_loss, weighted_score
     @property
