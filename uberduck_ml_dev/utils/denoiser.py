@@ -21,8 +21,11 @@ audio_denoised = audio_denoised * normalize
 
 import sys
 import torch
-from ..models.common import STFT
-from ..vocoders.istftnet import iSTFTNetGenerator, TorchSTFT
+#from ..models.common import STFT
+#from ..vocoders.istftnet import iSTFTNetGenerator, TorchSTFT
+
+from uberduck_ml_dev.models.common import STFT
+from uberduck_ml_dev.vocoders.istftnet import iSTFTNetGenerator, TorchSTFT
 
 
 class Denoiser(torch.nn.Module):
@@ -90,8 +93,9 @@ class Denoiser(torch.nn.Module):
         :return: Denoised audio
         :rtype: tensor
         """
+        audio = audio.to(Denoiser.device).float()
 
-        audio_spec, audio_angles = self.stft.transform(audio.to(Denoiser.device)).float()
+        audio_spec, audio_angles = self.stft.transform(audio.to(Denoiser.device))
         audio_spec_denoised = audio_spec - self.bias_spec * strength
         audio_spec_denoised = torch.clamp(audio_spec_denoised, 0.0)
         audio_denoised = self.stft.inverse(audio_spec_denoised, audio_angles)
