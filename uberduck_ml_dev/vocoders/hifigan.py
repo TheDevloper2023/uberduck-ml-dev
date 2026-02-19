@@ -84,6 +84,7 @@ class HiFiGanGenerator(nn.Module):
             torch.load(
                 self.checkpoint,
                 map_location="cuda" if self.device == "cuda" else "cpu",
+                weights_only = False
             )["generator"]
         )
         if self.device == "cuda":
