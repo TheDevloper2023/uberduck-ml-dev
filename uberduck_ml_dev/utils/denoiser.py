@@ -1,38 +1,15 @@
-"""
-Removes bias from HiFi-Gan and Avocodo (typically heard as noise in the audio)
-
-Usage:
-from denoiser import Denoiser
-denoiser = Denoiser(HIFIGANGENERATOR, mode="normal") # Experiment with modes "normal" and "zeros"
-
-# Inference Vocoder
-audio = hifigan.vocoder.forward(output[1][:1])
-
-audio = audio.squeeze()
-audio = audio * 32768.0
-
-# Denoise
-audio_denoised = denoiser(audio.view(1, -1), strength=15)[:, 0] # Change strength if needed
-
-audio_denoised = audio_denoised.cpu().detach().numpy().reshape(-1)
-normalize = (32768.0 / np.max(np.abs(audio_denoised))) ** 0.9
-audio_denoised = audio_denoised * normalize
-"""
-
 import sys
 import torch
-#from ..models.common import STFT
-#from ..vocoders.istftnet import iSTFTNetGenerator, TorchSTFT
-
+import math
+import numpy as np
 from uberduck_ml_dev.models.common import STFT
 from uberduck_ml_dev.vocoders.istftnet import iSTFTNetGenerator, TorchSTFT
 
-
 class Denoiser(torch.nn.Module):
-    """WaveGlow denoiser, adapted for HiFi-GAN"""
+    """WaveGlow denoiser, adapted for HiFi-GAN and iSTFTNet"""
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
+    # Explicitly use cuda:0 to avoid the "cuda:None" error
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     def __init__(
         self, hifigan, filter_length=1024, n_overlap=4, win_length=1024, mode="zeros"
@@ -45,6 +22,12 @@ class Denoiser(torch.nn.Module):
             device=Denoiser.device
         )
 
+        # Manual buffer migration for STFT (fixes "AttributeError: .to")
+        if hasattr(self.stft, 'forward_basis'):
+            self.stft.forward_basis = self.stft.forward_basis.to(Denoiser.device)
+        if hasattr(self.stft, 'inverse_basis'):
+            self.stft.inverse_basis = self.stft.inverse_basis.to(Denoiser.device)
+
         if mode == "zeros":
             mel_input = torch.zeros((1, 80, 88)).to(Denoiser.device)
         elif mode == "normal":
@@ -55,47 +38,47 @@ class Denoiser(torch.nn.Module):
             mel_input = torch.full((1, 80, 88), 0.5).to(Denoiser.device)
         elif mode == "normal_alt":
             mel_input = torch.rand((1, 80, 88)).to(Denoiser.device)
-        elif mode == "sinusoid": #This one was made by chatgpt, I will admit it
-            t = torch.linspace(0, 2 * math.pi, steps=88)      # 88 time steps
-            wave = torch.sin(t)                                # sine wave
-            mel_input = wave.repeat(80, 1).unsqueeze(0)       # repeat for 80 mel channels
-            mel_input = mel_input.to(Denoiser.device)
+        elif mode == "sinusoid":
+            t = torch.linspace(0, 2 * math.pi, steps=88)
+            wave = torch.sin(t)
+            mel_input = wave.repeat(80, 1).unsqueeze(0).to(Denoiser.device)
         else:
-            raise Exception("Mode {} if not supported".format(mode))
+            raise Exception("Mode {} is not supported".format(mode))
 
         with torch.no_grad():
             if isinstance(hifigan, iSTFTNetGenerator):
+                # Re-initialize for iSTFTNet specific settings
                 self.stft = TorchSTFT(filter_length=16, hop_length=4, win_length=16, device=Denoiser.device)
-                spec, phase = hifigan.vocoder(mel_input.to(Denoiser.device))
-                y_g_hat = self.stft.inverse(spec.cpu(), phase.cpu())
-                bias_audio = (
-                    y_g_hat
-                    .view(1, -1)
-                    .float()
-                )
+                
+                # Manual buffer migration for TorchSTFT window
+                if hasattr(self.stft, 'window'):
+                    self.stft.window = self.stft.window.to(Denoiser.device)
+                
+                # Keep spec and phase on GPU (don't use .cpu())
+                spec, phase = hifigan.vocoder(mel_input)
+                y_g_hat = self.stft.inverse(spec, phase)
+                bias_audio = y_g_hat.view(1, -1).float()
             else:
                 bias_audio = (
-                    hifigan.vocoder.forward(mel_input.to(Denoiser.device))
+                    hifigan.vocoder.forward(mel_input)
                     .view(1, -1)
                     .float()
                 )
+            
             bias_spec, _ = self.stft.transform(bias_audio)
 
         self.register_buffer("bias_spec", bias_spec[:, :, 0][:, :, None])
 
     def forward(self, audio, strength=10):
         """
-        Strength is the amount of bias you want to be removed from the final audio.
-        Note: A higher strength may remove too much information in the original audio.
-
-        :param audio: Audio data
-        :param strength: Amount of bias removal. Recommended range 10 - 50
-        :return: Denoised audio
-        :rtype: tensor
+        :param audio: Audio data tensor
+        :param strength: Amount of bias removal (Recommended 10 - 50)
+        :return: Denoised audio tensor
         """
         audio = audio.to(Denoiser.device).float()
 
-        audio_spec, audio_angles = self.stft.transform(audio.to(Denoiser.device))
+        # Ensure transform and inverse operations stay on the same device
+        audio_spec, audio_angles = self.stft.transform(audio)
         audio_spec_denoised = audio_spec - self.bias_spec * strength
         audio_spec_denoised = torch.clamp(audio_spec_denoised, 0.0)
         audio_denoised = self.stft.inverse(audio_spec_denoised, audio_angles)
