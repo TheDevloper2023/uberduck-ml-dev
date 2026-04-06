@@ -260,7 +260,7 @@ def trim_audio(path, new_path, top_db=20):
 
     Similar functionality to normalize_audio_segment, but uses librosa instead of pydub.
     """
-    signal, sr = librosa.load(path)
+    signal, sr = librosa.load(path, sr=None)
     trimmed, _ = librosa.effects.trim(signal, top_db=top_db)
     trimmed = (MAX_WAV_INT16 * trimmed).astype(np.int16)
     write(new_path, sr, trimmed)
@@ -273,8 +273,6 @@ def load_wav_to_torch(path):
     return torch.FloatTensor(data.astype(np.float32)), sr
 
 # Cell
-
-from scipy import signal
 
 
 def overlay_mono(audio1, audio2):
@@ -311,14 +309,14 @@ def stereo_to_mono(audio):
     """
     Convert stereo audio data to mean mono audio data.
     """
-    return librosa.to_mono(audio)
+    return librosa.to_mono(y=audio)
 
 
 def resample(audio, source_sr, target_sr):
     """
     Change the sampling rate of a mono np audio array
     """
-    resampled_audio = librosa.resample(audio, source_sr, target_sr)
+    resampled_audio = librosa.resample(y=audio, orig_sr=source_sr, target_sr=target_sr)
     return resampled_audio
 
 
