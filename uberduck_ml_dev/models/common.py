@@ -363,7 +363,7 @@ class MelSTFT:
             padding=padding,
         )
         mel_basis = librosa_mel(
-            sr=sampling_rate, n_fft=filter_length, n_mels=n_mel_channels, mel_fmin=mel_fmin, mel_fmax=mel_fmax
+            sr=sampling_rate, n_fft=filter_length, n_mels=n_mel_channels, fmin=mel_fmin, fmax=mel_fmax
         )
         mel_basis = torch.from_numpy(mel_basis).float()
         if device == "cuda":
