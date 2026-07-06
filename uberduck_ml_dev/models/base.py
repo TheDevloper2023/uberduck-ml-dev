@@ -44,6 +44,10 @@ class TTSModel(nn.Module):
             model_dict = {k: v for k, v in model_dict.items() if k not in ignore_layers}
         dummy_dict = self.state_dict()
 
+        for key in model_dict.keys():
+            if key not in dummy_dict.keys() or dummy_dict[key].shape != model_dict[key].shape:
+                model_dict.pop(key)
+
         for k in self.state_dict().keys():
             if k not in model_dict.keys():
                 print(

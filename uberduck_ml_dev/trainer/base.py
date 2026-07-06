@@ -132,13 +132,17 @@ class TTSTrainer:
         model_state_dict = (
             checkpoint["model"] if "model" in checkpoint else checkpoint["state_dict"]
         )
+
         model.from_pretrained(
             model_dict=model_state_dict,
             device=self.device,
             ignore_layers=self.ignore_layers,
         )
         if "optimizer" in checkpoint and len(self.ignore_layers) == 0:
-            optimizer.load_state_dict(checkpoint["optimizer"])
+            try: #Idk why gosmokeless28 wanted it this way, can't we just move to fastspeech2 yet ;-;
+                optimizer.load_state_dict(checkpoint["optimizer"])
+            except KeyError:
+                print("Warning: Optimizer state not found in checkpoint.")
         if "iteration" in checkpoint:
             start_epoch = checkpoint["iteration"] + 1
         if "global_step" in checkpoint:

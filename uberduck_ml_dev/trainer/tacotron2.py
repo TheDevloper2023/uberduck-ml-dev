@@ -468,7 +468,7 @@ class Tacotron2Trainer(TTSTrainer):
         # Save when the training stops / crashes
 
         def _save_on_shutdown(signum=None, frame=None):
-            print("\n" + "Saving checkpoint at step {self.global_step}")
+            print("\n" + f"Saving checkpoint at step {self.global_step}")
             try:
                 self.save_checkpoint(
                     f"{self.checkpoint_name}_step_{self.global_step}",
